@@ -6,5 +6,6 @@ dist/
 .env
 .env.*
 !.env.example
+!blueprints/web-hono/template/.env.example.tpl
 .agents/
 .mcp/
