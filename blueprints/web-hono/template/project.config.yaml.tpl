@@ -13,4 +13,4 @@ systems:
     type: hono
     port: 3000
 bootstrapper:
-  version: 0.1.0
+  version: __BOOTSTRAPPER_VERSION__
