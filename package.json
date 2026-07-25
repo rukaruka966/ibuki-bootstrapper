@@ -1,6 +1,6 @@
 {
   "name": "ibuki-bootstrapper",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "Bootstrap a production-ready React and Hono project on Windows.",
   "packageManager": "pnpm@11.12.0",
