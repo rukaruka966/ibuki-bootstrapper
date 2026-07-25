@@ -277,7 +277,7 @@ function Wait-ForQualityWorkflow {
         }
 
         if (-not [string]::IsNullOrWhiteSpace(($json -join ""))) {
-            $runs = ($json -join "`n") | ConvertFrom-Json
+            $runs = @(($json -join "`n") | ConvertFrom-Json)
 
             if ($runs.Count -gt 0) {
                 $run = $runs[0]
