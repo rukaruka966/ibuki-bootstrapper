@@ -1,0 +1,62 @@
+# AGENTS.md
+
+## Purpose
+
+This repository contains Ibuki Bootstrapper. It generates a new React and Hono
+project, verifies it locally, and can provision a private GitHub repository.
+
+## Environment
+
+- Windows 11
+- PowerShell 7.6 or later
+- Node.js 24 or later
+- pnpm 11 or later
+- Git for Windows
+- GitHub CLI
+
+## Commands
+
+Run all repository quality tasks through pnpm:
+
+```powershell
+pnpm install
+pnpm run lint
+pnpm run test
+pnpm run test:generated
+pnpm run verify
+```
+
+## Development rules
+
+- Keep `bootstrap.ps1` compatible with PowerShell 7.
+- Save text as UTF-8 without BOM and use LF line endings.
+- Never write secrets, GitHub tokens, or user-specific absolute paths.
+- Never overwrite or delete files in a generation destination.
+- Keep interactive prompts and non-interactive CI execution behavior aligned.
+- Validate local generation before making GitHub changes.
+- Keep the public entry point self-contained.
+- Use the Blueprint manifest as the source of truth for generated files.
+
+## Git workflow
+
+- Register implementation work in a GitHub Issue when a remote exists.
+- Branch from `develop` for normal feature work.
+- Use three-line Conventional Commit messages without scopes:
+
+  ```text
+  feat: add project generation
+
+  Explain why and what changed.
+  ```
+
+- Do not use `feat(scope): ...` style messages.
+
+## Safety gates
+
+Stop for explicit confirmation before:
+
+- overwriting or deleting existing user files;
+- deleting a GitHub repository;
+- changing persisted-data semantics;
+- weakening an existing repository ruleset;
+- exposing a private repository or secret.

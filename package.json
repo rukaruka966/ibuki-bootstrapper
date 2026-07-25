@@ -1,0 +1,21 @@
+{
+  "name": "ibuki-bootstrapper",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Bootstrap a production-ready React and Hono project on Windows.",
+  "packageManager": "pnpm@11.12.0",
+  "engines": {
+    "node": ">=24.0.0",
+    "pnpm": ">=11.0.0"
+  },
+  "scripts": {
+    "lint": "oxlint scripts tests && markdownlint \"**/*.md\" --ignore node_modules && pwsh -NoProfile -File ./scripts/check-powershell.ps1",
+    "test": "node --test tests/*.test.mjs",
+    "test:generated": "pwsh -NoProfile -File ./scripts/test-generated-project.ps1",
+    "verify": "pnpm run lint && pnpm run test && pnpm run test:generated"
+  },
+  "devDependencies": {
+    "markdownlint-cli": "0.49.1",
+    "oxlint": "1.75.0"
+  }
+}
