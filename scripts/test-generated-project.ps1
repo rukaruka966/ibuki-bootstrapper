@@ -38,9 +38,31 @@ try {
         }
     }
 
+    & git -C $testRoot init -b main --quiet
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to initialize the generated project for ignore verification."
+    }
+
+    & git -C $testRoot add --all
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to stage the generated project for ignore verification."
+    }
+
+    $trackedBuildMetadata = & git -C $testRoot ls-files "*.tsbuildinfo"
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to inspect tracked TypeScript build metadata."
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace(($trackedBuildMetadata -join "`n"))) {
+        throw "Generated TypeScript build metadata would be included in the initial commit."
+    }
+
     $unresolvedTokens = Get-ChildItem -LiteralPath $testRoot -Recurse -File |
         Where-Object {
-            $_.FullName -notmatch '[\\/]node_modules[\\/]'
+            $_.FullName -notmatch '[\\/](node_modules|\.git)[\\/]'
         } |
         Select-String -Pattern '__PROJECT_(ID|DISPLAY_NAME|DISPLAY_NAME_(HTML|JSON|YAML))__'
 
