@@ -16,7 +16,7 @@ $OutputEncoding = [System.Text.Encoding]::UTF8
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$script:BootstrapperVersion = "0.1.0"
+$script:BootstrapperVersion = "0.1.1"
 $script:BootstrapperRepository = "rukaruka966/ibuki-bootstrapper"
 $script:RawBaseUrl = "https://raw.githubusercontent.com/$($script:BootstrapperRepository)/main"
 $script:CreatedFiles = [System.Collections.Generic.List[string]]::new()
@@ -651,6 +651,7 @@ function Invoke-IbukiBootstrap {
     $displayNameJson = $DisplayName | ConvertTo-Json -Compress
     $displayNameHtml = [System.Net.WebUtility]::HtmlEncode($DisplayName)
     $tokens = @{
+        "__BOOTSTRAPPER_VERSION__" = $script:BootstrapperVersion
         "__PROJECT_ID__" = $ProjectId
         "__PROJECT_DISPLAY_NAME__" = $DisplayName
         "__PROJECT_DISPLAY_NAME_YAML__" = $displayNameYaml
