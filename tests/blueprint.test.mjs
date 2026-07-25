@@ -42,6 +42,7 @@ test("every manifest source exists and uses LF", async () => {
 test("template files use only supported tokens", async () => {
   const manifest = await readManifest();
   const supportedTokens = new Set([
+    "__BOOTSTRAPPER_VERSION__",
     "__PROJECT_ID__",
     "__PROJECT_DISPLAY_NAME__",
     "__PROJECT_DISPLAY_NAME_HTML__",
