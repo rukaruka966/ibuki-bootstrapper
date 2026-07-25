@@ -1,25 +1,25 @@
 # __PROJECT_DISPLAY_NAME__
 
-`__PROJECT_ID__` is a pnpm workspace containing a React frontend and a Hono
-backend-for-frontend.
+`__PROJECT_ID__`は、ReactフロントエンドとHono BFFで構成されるpnpm
+ワークスペースです。
 
-## Requirements
+## 必要な環境
 
-- Node.js 24 or later
-- pnpm 11 or later
+- Node.js 24以降
+- pnpm 11以降
 - PowerShell 7
 
-## Start
+## 開発環境の起動
 
 ```powershell
 pnpm install
 pnpm run dev
 ```
 
-The frontend runs on `http://127.0.0.1:5173` and the BFF runs on
-`http://127.0.0.1:3000`.
+フロントエンドは`http://127.0.0.1:5173`、BFFは
+`http://127.0.0.1:3000`で起動します。
 
-## Verify
+## 検証
 
 ```powershell
 pnpm run lint
@@ -30,7 +30,7 @@ pnpm run smoke
 pnpm run doctor
 ```
 
-## Repository workflow
+## リポジトリ運用
 
-Feature pull requests target `develop`. Release pull requests merge `develop`
-into `main`.
+機能開発のPull Requestは`develop`を対象にします。リリース時は、検証済みの変更を
+`develop`から`main`へ反映します。
