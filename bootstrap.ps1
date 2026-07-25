@@ -16,7 +16,7 @@ $OutputEncoding = [System.Text.Encoding]::UTF8
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$script:BootstrapperVersion = "0.1.1"
+$script:BootstrapperVersion = "0.1.2"
 $script:BootstrapperRepository = "rukaruka966/ibuki-bootstrapper"
 $script:RawBaseUrl = "https://raw.githubusercontent.com/$($script:BootstrapperRepository)/main"
 $script:CreatedFiles = [System.Collections.Generic.List[string]]::new()
@@ -351,7 +351,7 @@ function New-ProtectionRuleset {
         )
     }
 
-    $json = $payload | ConvertTo-Json -Depth 20
+    $json = $payload | ConvertTo-Json -Depth 20 -Compress
     $json | & gh api `
         --method POST `
         "repos/$Repository/rulesets" `
