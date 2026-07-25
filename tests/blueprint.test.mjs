@@ -94,3 +94,69 @@ test("blueprint dependencies are pinned", async () => {
     }
   }
 });
+
+test("Bootstrapper and package versions stay synchronized", async () => {
+  const packageJson = JSON.parse(
+    await readFile(path.join(repositoryRoot, "package.json"), "utf8"),
+  );
+  const bootstrap = await readFile(
+    path.join(repositoryRoot, "bootstrap.ps1"),
+    "utf8",
+  );
+  const versionMatch = bootstrap.match(
+    /\$script:BootstrapperVersion = "([^"]+)"/,
+  );
+
+  assert.notEqual(versionMatch, null);
+  assert.equal(versionMatch[1], packageJson.version);
+});
+
+test("generated TypeScript build metadata is ignored", async () => {
+  const gitignore = await readFile(
+    path.join(blueprintRoot, "template", ".gitignore.tpl"),
+    "utf8",
+  );
+
+  assert.match(gitignore, /^\*\.tsbuildinfo$/m);
+});
+
+test("GitHub ruleset JSON uses a UTF-8 file instead of a pipeline", async () => {
+  const bootstrap = await readFile(
+    path.join(repositoryRoot, "bootstrap.ps1"),
+    "utf8",
+  );
+
+  assert.equal(bootstrap.includes("$json | & gh api"), false);
+  assert.match(
+    bootstrap,
+    /\[System\.IO\.File\]::WriteAllText\(\$payloadPath, \$json, \$utf8WithoutBom\)/,
+  );
+  assert.match(bootstrap, /--input \$payloadPath/);
+  assert.match(bootstrap, /X-GitHub-Api-Version: 2026-03-10/);
+});
+
+test("incomplete repository protection is reported in the completion output", async () => {
+  const bootstrap = await readFile(
+    path.join(repositoryRoot, "bootstrap.ps1"),
+    "utf8",
+  );
+
+  assert.match(bootstrap, /ProtectionComplete = \$protectionComplete/);
+  assert.match(bootstrap, /Project created with warnings\./);
+  assert.match(bootstrap, /Protection : INCOMPLETE/);
+});
+
+test("repository provisioning verifies ruleset details and final branch", async () => {
+  const bootstrap = await readFile(
+    path.join(repositoryRoot, "bootstrap.ps1"),
+    "utf8",
+  );
+
+  assert.match(bootstrap, /function Assert-ProtectionRuleset/);
+  assert.match(bootstrap, /required_review_thread_resolution/);
+  assert.match(bootstrap, /required_approving_review_count -ne 0/);
+  assert.match(bootstrap, /allowedMergeMethods -notcontains "squash"/);
+  assert.match(bootstrap, /requiredContexts -notcontains "Quality"/);
+  assert.match(bootstrap, /strict_required_status_checks_policy/);
+  assert.match(bootstrap, /currentBranch -ne "develop"/);
+});

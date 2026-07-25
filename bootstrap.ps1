@@ -11,12 +11,13 @@ param(
     [switch]$Yes
 )
 
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-$OutputEncoding = [System.Text.Encoding]::UTF8
+$utf8WithoutBom = [System.Text.UTF8Encoding]::new($false)
+[Console]::OutputEncoding = $utf8WithoutBom
+$OutputEncoding = $utf8WithoutBom
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$script:BootstrapperVersion = "0.1.2"
+$script:BootstrapperVersion = "0.1.3"
 $script:BootstrapperRepository = "rukaruka966/ibuki-bootstrapper"
 $script:RawBaseUrl = "https://raw.githubusercontent.com/$($script:BootstrapperRepository)/main"
 $script:CreatedFiles = [System.Collections.Generic.List[string]]::new()
@@ -48,11 +49,14 @@ function Invoke-CheckedCommand {
     Push-Location -LiteralPath $WorkingDirectory
 
     try {
-        & $FilePath @Arguments
+        & $FilePath @Arguments | ForEach-Object {
+            Write-Host $_
+        }
+        $exitCode = $LASTEXITCODE
 
-        if ($LASTEXITCODE -ne 0) {
+        if ($exitCode -ne 0) {
             $argumentText = $Arguments -join " "
-            throw "Command failed with exit code $LASTEXITCODE`: $FilePath $argumentText"
+            throw "Command failed with exit code $exitCode`: $FilePath $argumentText"
         }
     } finally {
         Pop-Location
@@ -352,14 +356,104 @@ function New-ProtectionRuleset {
     }
 
     $json = $payload | ConvertTo-Json -Depth 20 -Compress
-    $json | & gh api `
-        --method POST `
-        "repos/$Repository/rulesets" `
-        --input - `
-        --silent
+    $payloadPath = [System.IO.Path]::GetTempFileName()
+
+    try {
+        $utf8WithoutBom = [System.Text.UTF8Encoding]::new($false)
+        [System.IO.File]::WriteAllText($payloadPath, $json, $utf8WithoutBom)
+
+        & gh api `
+            --method POST `
+            "repos/$Repository/rulesets" `
+            -H "Accept: application/vnd.github+json" `
+            -H "X-GitHub-Api-Version: 2026-03-10" `
+            --input $payloadPath `
+            --silent
+
+        if ($LASTEXITCODE -ne 0) {
+            throw "Unable to create the '$Branch' repository ruleset."
+        }
+    } finally {
+        if (Test-Path -LiteralPath $payloadPath) {
+            Remove-Item -LiteralPath $payloadPath -Force
+        }
+    }
+}
+
+function Assert-ProtectionRuleset {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Repository,
+
+        [Parameter(Mandatory)]
+        [string]$Branch,
+
+        [Parameter(Mandatory)]
+        [object[]]$Rulesets
+    )
+
+    $expectedName = "Protect $Branch"
+    $matches = @($Rulesets | Where-Object { $_.name -eq $expectedName })
+
+    if ($matches.Count -ne 1) {
+        throw "Ruleset verification failed: expected exactly one '$expectedName' ruleset."
+    }
+
+    $rulesetId = $matches[0].id
+    $detailsJson = & gh api `
+        "repos/$Repository/rulesets/$rulesetId" `
+        -H "Accept: application/vnd.github+json" `
+        -H "X-GitHub-Api-Version: 2026-03-10"
 
     if ($LASTEXITCODE -ne 0) {
-        throw "Unable to create the '$Branch' repository ruleset."
+        throw "Unable to inspect the '$expectedName' repository ruleset."
+    }
+
+    $details = ($detailsJson -join "`n") | ConvertFrom-Json
+    $includedRefs = @($details.conditions.ref_name.include)
+
+    if ($details.enforcement -ne "active") {
+        throw "Ruleset verification failed: '$expectedName' is not active."
+    }
+
+    if ($includedRefs -notcontains "refs/heads/$Branch") {
+        throw "Ruleset verification failed: '$expectedName' does not target '$Branch'."
+    }
+
+    $rules = @($details.rules)
+    $ruleTypes = @($rules | ForEach-Object { $_.type })
+
+    foreach ($requiredType in @("deletion", "non_fast_forward", "pull_request", "required_status_checks")) {
+        if ($ruleTypes -notcontains $requiredType) {
+            throw "Ruleset verification failed: '$expectedName' is missing '$requiredType'."
+        }
+    }
+
+    $pullRequestRule = @($rules | Where-Object { $_.type -eq "pull_request" })[0]
+
+    if (-not $pullRequestRule.parameters.required_review_thread_resolution) {
+        throw "Ruleset verification failed: '$expectedName' does not require resolved review threads."
+    }
+
+    if ([int]$pullRequestRule.parameters.required_approving_review_count -ne 0) {
+        throw "Ruleset verification failed: '$expectedName' requires an unexpected approval count."
+    }
+
+    $allowedMergeMethods = @($pullRequestRule.parameters.allowed_merge_methods)
+
+    if ($allowedMergeMethods.Count -ne 1 -or $allowedMergeMethods -notcontains "squash") {
+        throw "Ruleset verification failed: '$expectedName' does not allow only squash merges."
+    }
+
+    $statusRule = @($rules | Where-Object { $_.type -eq "required_status_checks" })[0]
+    $requiredContexts = @($statusRule.parameters.required_status_checks | ForEach-Object { $_.context })
+
+    if ($requiredContexts -notcontains "Quality") {
+        throw "Ruleset verification failed: '$expectedName' does not require the Quality status check."
+    }
+
+    if (-not $statusRule.parameters.strict_required_status_checks_policy) {
+        throw "Ruleset verification failed: '$expectedName' does not require an up-to-date branch."
     }
 }
 
@@ -438,23 +532,25 @@ function Invoke-GitHubProvisioning {
         throw "Unable to configure repository merge settings."
     }
 
+    $protectionComplete = $true
+
     try {
         New-ProtectionRuleset -Repository $repository -Branch "main"
         New-ProtectionRuleset -Repository $repository -Branch "develop"
 
-        $rulesetsJson = & gh api "repos/$repository/rulesets"
+        $rulesetsJson = & gh api `
+            "repos/$repository/rulesets" `
+            -H "Accept: application/vnd.github+json" `
+            -H "X-GitHub-Api-Version: 2026-03-10"
 
         if ($LASTEXITCODE -ne 0) {
             throw "Unable to verify repository rulesets."
         }
 
-        $rulesets = ($rulesetsJson -join "`n") | ConvertFrom-Json
-        $rulesetNames = @($rulesets | ForEach-Object { $_.name })
+        $rulesets = @(($rulesetsJson -join "`n") | ConvertFrom-Json)
 
-        foreach ($expectedName in @("Protect main", "Protect develop")) {
-            if ($rulesetNames -notcontains $expectedName) {
-                throw "Ruleset verification failed: '$expectedName' was not returned by GitHub."
-            }
+        foreach ($branch in @("main", "develop")) {
+            Assert-ProtectionRuleset -Repository $repository -Branch $branch -Rulesets $rulesets
         }
 
         Write-Host "[OK] Repository rulesets"
@@ -468,6 +564,8 @@ function Invoke-GitHubProvisioning {
         if (-not (Confirm-Action -Prompt "Ruleset configuration failed. Keep the repository without complete protection?")) {
             throw "Repository provisioning stopped because protection is incomplete."
         }
+
+        $protectionComplete = $false
     }
 
     $status = Get-CommandOutput -FilePath git -Arguments @("status", "--porcelain") -WorkingDirectory $ProjectRoot
@@ -476,7 +574,19 @@ function Invoke-GitHubProvisioning {
         throw "Generated repository is not clean after provisioning."
     }
 
-    return $repository
+    $currentBranch = Get-CommandOutput `
+        -FilePath git `
+        -Arguments @("branch", "--show-current") `
+        -WorkingDirectory $ProjectRoot
+
+    if ($currentBranch -ne "develop") {
+        throw "Generated repository ended on '$currentBranch' instead of 'develop'."
+    }
+
+    return [PSCustomObject]@{
+        Repository = $repository
+        ProtectionComplete = $protectionComplete
+    }
 }
 
 function Invoke-IbukiBootstrap {
@@ -684,22 +794,36 @@ function Invoke-IbukiBootstrap {
     Invoke-CheckedCommand -FilePath pnpm -Arguments @("run", "doctor") -WorkingDirectory $Destination
 
     $repository = ""
+    $repositoryProtectionComplete = $true
 
     if (-not $SkipGitHub) {
-        $repository = Invoke-GitHubProvisioning `
+        $provisioningResult = Invoke-GitHubProvisioning `
             -ProjectRoot $Destination `
             -Owner $owner `
             -RepoName $RepositoryName `
             -Description $RepositoryDescription
+        $repository = $provisioningResult.Repository
+        $repositoryProtectionComplete = $provisioningResult.ProtectionComplete
     }
 
     Write-Phase -Name "Complete"
-    Write-Host "Project created successfully." -ForegroundColor Green
+
+    if ($repositoryProtectionComplete) {
+        Write-Host "Project created successfully." -ForegroundColor Green
+    } else {
+        Write-Host "Project created with warnings." -ForegroundColor Yellow
+        Write-Warning "Repository protection is incomplete because one or more rulesets were not configured."
+    }
+
     Write-Host "Location   : $Destination"
 
     if (-not [string]::IsNullOrWhiteSpace($repository)) {
         Write-Host "Repository : https://github.com/$repository"
         Write-Host "Branch     : develop"
+
+        if (-not $repositoryProtectionComplete) {
+            Write-Host "Protection : INCOMPLETE" -ForegroundColor Yellow
+        }
     }
 }
 
