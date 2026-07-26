@@ -156,7 +156,7 @@ function ConvertTo-BootstrapperVersion {
         return $Matches.Version
     }
 
-    return $state.BootstrapperVersion
+    return "unavailable"
 }
 
 function Get-LocalReleaseMetadata {
@@ -248,7 +248,7 @@ function Get-RemoteReleaseMetadata {
             CommitId = "unavailable"
             FullCommitId = ""
             Channel = "main"
-            Version = $state.BootstrapperVersion
+            Version = "unavailable"
         }
     }
 
@@ -1173,11 +1173,11 @@ function Invoke-IbukiBootstrap {
     $nodeVersion = Get-CommandOutput -FilePath node -Arguments @("--version") -WorkingDirectory (Get-Location).Path
     $pnpmVersion = Get-CommandOutput -FilePath pnpm -Arguments @("--version") -WorkingDirectory (Get-Location).Path
     $gitVersion = Get-CommandOutput -FilePath git -Arguments @("--version") -WorkingDirectory (Get-Location).Path
-    $nodeMajor = [int](($nodeVersion.TrimStart("v") -split "\.")[0])
+    $nodeSemanticVersion = [version]($nodeVersion.TrimStart("v"))
     $pnpmMajor = [int](($pnpmVersion -split "\.")[0])
 
-    if ($nodeMajor -lt 24) {
-        throw "Node.js 24 or later is required. Found: $nodeVersion"
+    if ($nodeSemanticVersion -lt [version]"24.10.0") {
+        throw "Node.js 24.10.0 or later is required. Found: $nodeVersion"
     }
 
     if ($pnpmMajor -lt 11) {

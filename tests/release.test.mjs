@@ -104,6 +104,26 @@ test("release configuration publishes only from main without source commits", ()
   );
 });
 
+test("repository Node.js minimum supports semantic-release", async () => {
+  const packageJson = JSON.parse(
+    await readFile(path.join(repositoryRoot, "package.json"), "utf8"),
+  );
+  const semanticReleasePackage = JSON.parse(
+    await readFile(
+      path.join(
+        repositoryRoot,
+        "node_modules",
+        "semantic-release",
+        "package.json",
+      ),
+      "utf8",
+    ),
+  );
+
+  assert.equal(packageJson.engines.node, ">=24.10.0");
+  assert.match(semanticReleasePackage.engines.node, />= 24\.10\.0/);
+});
+
 test("Conventional Commits produce the expected release types", async () => {
   assert.equal(await getReleaseType("fix: correct metadata"), "patch");
   assert.equal(await getReleaseType("feat: automate releases"), "minor");
@@ -190,4 +210,18 @@ test("release metadata lookup failure is non-blocking", () => {
   assert.match(output, /Release\/Tag : unavailable/);
   assert.match(output, /Commit ID\s+: unavailable/);
   assert.match(output, /Cancelled\./);
+});
+
+test("release metadata lookup failure does not stamp a stale version", () => {
+  const result = runWithMockedGitHubApi({
+    fail: true,
+    mainCommit: "",
+    releaseCommit: "",
+    input: "1\nbad_name\n\n\nn\n",
+  });
+  const output = `${result.stdout}\n${result.stderr}`;
+
+  assert.match(output, /Release\/Tag : unavailable/);
+  assert.match(output, /Version : unavailable/);
+  assert.match(output, /Project ID must start with a lowercase letter/);
 });

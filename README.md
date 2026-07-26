@@ -15,7 +15,7 @@ Ibuki自身の変更履歴は
 
 - Windows 11
 - PowerShell 7.6以降
-- Node.js 24以降
+- Node.js 24.10.0以降
 - pnpm 11以降
 - Git for Windows
 - `gh auth login`で認証済みのGitHub CLI
