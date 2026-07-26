@@ -863,7 +863,25 @@ function New-ProtectionRuleset {
         [string]$Repository,
 
         [Parameter(Mandatory)]
-        [string]$Branch
+        [string]$Branch,
+
+        [Parameter(Mandatory)]
+        [ValidateSet("merge", "squash")]
+        [string]$MergeMethod,
+
+        [Parameter(Mandatory)]
+        [string[]]$RequiredContexts,
+
+        [Parameter(Mandatory)]
+        [bool]$StrictRequiredChecks
+    )
+
+    $requiredStatusChecks = @(
+        $RequiredContexts | ForEach-Object {
+            @{
+                context = $_
+            }
+        }
     )
 
     $payload = @{
@@ -886,7 +904,7 @@ function New-ProtectionRuleset {
             @{
                 type = "pull_request"
                 parameters = @{
-                    allowed_merge_methods = @("squash")
+                    allowed_merge_methods = @($MergeMethod)
                     dismiss_stale_reviews_on_push = $false
                     require_code_owner_review = $false
                     require_last_push_approval = $false
@@ -898,12 +916,8 @@ function New-ProtectionRuleset {
                 type = "required_status_checks"
                 parameters = @{
                     do_not_enforce_on_create = $true
-                    required_status_checks = @(
-                        @{
-                            context = "Quality"
-                        }
-                    )
-                    strict_required_status_checks_policy = $true
+                    required_status_checks = $requiredStatusChecks
+                    strict_required_status_checks_policy = $StrictRequiredChecks
                 }
             }
         )
@@ -943,6 +957,16 @@ function Assert-ProtectionRuleset {
         [string]$Branch,
 
         [Parameter(Mandatory)]
+        [ValidateSet("merge", "squash")]
+        [string]$ExpectedMergeMethod,
+
+        [Parameter(Mandatory)]
+        [string[]]$ExpectedContexts,
+
+        [Parameter(Mandatory)]
+        [bool]$ExpectedStrictRequiredChecks,
+
+        [Parameter(Mandatory)]
         [object[]]$Rulesets
     )
 
@@ -965,22 +989,39 @@ function Assert-ProtectionRuleset {
 
     $details = ($detailsJson -join "`n") | ConvertFrom-Json
     $includedRefs = @($details.conditions.ref_name.include)
+    $excludedRefs = @($details.conditions.ref_name.exclude)
 
     if ($details.enforcement -ne "active") {
         throw "Ruleset verification failed: '$expectedName' is not active."
     }
 
-    if ($includedRefs -notcontains "refs/heads/$Branch") {
-        throw "Ruleset verification failed: '$expectedName' does not target '$Branch'."
+    if ($includedRefs.Count -ne 1 -or $includedRefs[0] -ne "refs/heads/$Branch") {
+        throw "Ruleset verification failed: '$expectedName' does not target only '$Branch'."
+    }
+
+    if ($excludedRefs.Count -ne 0) {
+        throw "Ruleset verification failed: '$expectedName' unexpectedly excludes refs."
     }
 
     $rules = @($details.rules)
     $ruleTypes = @($rules | ForEach-Object { $_.type })
+    $expectedRuleTypes = @(
+        "deletion",
+        "non_fast_forward",
+        "pull_request",
+        "required_status_checks"
+    )
+    $unexpectedRuleTypes = @(
+        Compare-Object `
+            -ReferenceObject @($expectedRuleTypes | Sort-Object) `
+            -DifferenceObject @($ruleTypes | Sort-Object)
+    )
 
-    foreach ($requiredType in @("deletion", "non_fast_forward", "pull_request", "required_status_checks")) {
-        if ($ruleTypes -notcontains $requiredType) {
-            throw "Ruleset verification failed: '$expectedName' is missing '$requiredType'."
-        }
+    if (
+        $ruleTypes.Count -ne $expectedRuleTypes.Count -or
+        $unexpectedRuleTypes.Count -ne 0
+    ) {
+        throw "Ruleset verification failed: '$expectedName' has unexpected or duplicate rule types."
     }
 
     $pullRequestRule = @($rules | Where-Object { $_.type -eq "pull_request" })[0]
@@ -995,19 +1036,31 @@ function Assert-ProtectionRuleset {
 
     $allowedMergeMethods = @($pullRequestRule.parameters.allowed_merge_methods)
 
-    if ($allowedMergeMethods.Count -ne 1 -or $allowedMergeMethods -notcontains "squash") {
-        throw "Ruleset verification failed: '$expectedName' does not allow only squash merges."
+    if ($allowedMergeMethods.Count -ne 1 -or $allowedMergeMethods -notcontains $ExpectedMergeMethod) {
+        throw "Ruleset verification failed: '$expectedName' does not allow only '$ExpectedMergeMethod' merges."
     }
 
     $statusRule = @($rules | Where-Object { $_.type -eq "required_status_checks" })[0]
     $requiredContexts = @($statusRule.parameters.required_status_checks | ForEach-Object { $_.context })
 
-    if ($requiredContexts -notcontains "Quality") {
-        throw "Ruleset verification failed: '$expectedName' does not require the Quality status check."
+    $unexpectedContexts = @(
+        Compare-Object `
+            -ReferenceObject @($ExpectedContexts | Sort-Object -Unique) `
+            -DifferenceObject @($requiredContexts | Sort-Object -Unique)
+    )
+
+    if (
+        $requiredContexts.Count -ne $ExpectedContexts.Count -or
+        $unexpectedContexts.Count -ne 0
+    ) {
+        throw "Ruleset verification failed: '$expectedName' has unexpected required status checks."
     }
 
-    if (-not $statusRule.parameters.strict_required_status_checks_policy) {
-        throw "Ruleset verification failed: '$expectedName' does not require an up-to-date branch."
+    if (
+        [bool]$statusRule.parameters.strict_required_status_checks_policy -ne
+        $ExpectedStrictRequiredChecks
+    ) {
+        throw "Ruleset verification failed: '$expectedName' has an unexpected strict status check policy."
     }
 }
 
@@ -1077,7 +1130,7 @@ function Invoke-GitHubProvisioning {
         -F "has_issues=true" `
         -F "has_wiki=false" `
         -F "allow_squash_merge=true" `
-        -F "allow_merge_commit=false" `
+        -F "allow_merge_commit=true" `
         -F "allow_rebase_merge=false" `
         -F "delete_branch_on_merge=true" `
         --silent
@@ -1086,11 +1139,44 @@ function Invoke-GitHubProvisioning {
         throw "Unable to configure repository merge settings."
     }
 
+    $repositoryJson = & gh api `
+        "repos/$repository" `
+        -H "Accept: application/vnd.github+json" `
+        -H "X-GitHub-Api-Version: 2026-03-10"
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to verify repository merge settings."
+    }
+
+    $repositoryDetails = ($repositoryJson -join "`n") | ConvertFrom-Json
+
+    if (
+        -not $repositoryDetails.allow_merge_commit -or
+        -not $repositoryDetails.allow_squash_merge -or
+        $repositoryDetails.allow_rebase_merge -or
+        $repositoryDetails.default_branch -ne "main" -or
+        -not $repositoryDetails.delete_branch_on_merge
+    ) {
+        throw "Repository merge settings verification failed."
+    }
+
+    Write-Host "[OK] Repository merge settings"
+
     $protectionComplete = $true
 
     try {
-        New-ProtectionRuleset -Repository $repository -Branch "main"
-        New-ProtectionRuleset -Repository $repository -Branch "develop"
+        New-ProtectionRuleset `
+            -Repository $repository `
+            -Branch "main" `
+            -MergeMethod "merge" `
+            -RequiredContexts @("Quality") `
+            -StrictRequiredChecks $false
+        New-ProtectionRuleset `
+            -Repository $repository `
+            -Branch "develop" `
+            -MergeMethod "squash" `
+            -RequiredContexts @("Quality") `
+            -StrictRequiredChecks $true
 
         $rulesetsJson = & gh api `
             "repos/$repository/rulesets" `
@@ -1103,9 +1189,20 @@ function Invoke-GitHubProvisioning {
 
         $rulesets = @(($rulesetsJson -join "`n") | ConvertFrom-Json)
 
-        foreach ($branch in @("main", "develop")) {
-            Assert-ProtectionRuleset -Repository $repository -Branch $branch -Rulesets $rulesets
-        }
+        Assert-ProtectionRuleset `
+            -Repository $repository `
+            -Branch "main" `
+            -ExpectedMergeMethod "merge" `
+            -ExpectedContexts @("Quality") `
+            -ExpectedStrictRequiredChecks $false `
+            -Rulesets $rulesets
+        Assert-ProtectionRuleset `
+            -Repository $repository `
+            -Branch "develop" `
+            -ExpectedMergeMethod "squash" `
+            -ExpectedContexts @("Quality") `
+            -ExpectedStrictRequiredChecks $true `
+            -Rulesets $rulesets
 
         Write-Host "[OK] Repository rulesets"
     } catch {

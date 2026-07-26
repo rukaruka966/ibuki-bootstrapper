@@ -40,9 +40,18 @@ pnpm run doctor
 
 - The default branch is `main`.
 - Feature work branches from and merges into `develop`.
-- Releases merge from `develop` into `main`.
+- Feature Pull Requests use squash merge into `develop`.
+- Only `develop` may open a Pull Request targeting `main`.
+- Release Pull Requests use a merge commit from `develop` into `main`.
+- There is no direct-to-`main` emergency workflow.
 - Direct pushes to `main` and `develop` are prohibited after bootstrap.
 - Pull requests require successful CI and resolved review conversations.
+- Both protected branches require `Quality`. Its release source gate prevents
+  accidental misuse, but is not a security boundary because a Pull Request can
+  modify its Workflow.
+- Required checks are non-strict on `main`, avoiding reverse synchronization
+  after a release merge commit, and strict on `develop`, keeping feature Pull
+  Requests based on its latest state.
 
 Use Conventional Commit messages without scopes:
 

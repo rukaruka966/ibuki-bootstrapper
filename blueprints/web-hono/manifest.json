@@ -17,6 +17,7 @@
     { "source": "template/tsconfig.base.json.tpl", "target": "tsconfig.base.json", "template": false },
     { "source": "template/.github/workflows/ci.yml.tpl", "target": ".github/workflows/ci.yml", "template": false },
     { "source": "template/scripts/doctor.ps1.tpl", "target": "scripts/doctor.ps1", "template": false },
+    { "source": "template/scripts/check-pr-branch-policy.mjs.tpl", "target": "scripts/check-pr-branch-policy.mjs", "template": false },
     { "source": "template/scripts/smoke.mjs.tpl", "target": "scripts/smoke.mjs", "template": true },
     { "source": "template/systems/web-frontend/package.json.tpl", "target": "systems/web-frontend/package.json", "template": true },
     { "source": "template/systems/web-frontend/tsconfig.json.tpl", "target": "systems/web-frontend/tsconfig.json", "template": false },
