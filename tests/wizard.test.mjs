@@ -125,6 +125,97 @@ test("interactive wizard can cancel after a Coming soon choice", async () => {
   }
 });
 
+test("interactive wizard defaults a whitespace-only display name", async () => {
+  const workingDirectory = await mkdtemp(
+    path.join(tmpdir(), "ibuki-display-name-test-"),
+  );
+  const projectId = `ibuki-display-name-${process.pid}`;
+  const destination = path.join(workingDirectory, projectId);
+
+  try {
+    const result = spawnSync(
+      "pwsh",
+      ["-NoProfile", "-File", bootstrapPath],
+      {
+        cwd: workingDirectory,
+        encoding: "utf8",
+        input: `1\n${projectId}\n   \n\nn\nn\n`,
+        timeout: 30_000,
+      },
+    );
+    const output = `${result.stdout}\n${result.stderr}`;
+
+    assert.equal(result.status, 0, output);
+    assert.match(output, new RegExp(`Display name\\s+: ${projectId}`));
+    assert.match(output, /Cancelled\./);
+    assert.doesNotMatch(output, /\[Generate\]/);
+    await assert.rejects(access(destination));
+  } finally {
+    await rm(workingDirectory, { recursive: true, force: true });
+  }
+});
+
+test("GitHub choice EOF cancels before authentication or file creation", async () => {
+  const workingDirectory = await mkdtemp(
+    path.join(tmpdir(), "ibuki-github-eof-test-"),
+  );
+  const projectId = `ibuki-github-eof-${process.pid}`;
+  const destination = path.join(workingDirectory, projectId);
+
+  try {
+    const result = spawnSync(
+      "pwsh",
+      ["-NoProfile", "-File", bootstrapPath],
+      {
+        cwd: workingDirectory,
+        encoding: "utf8",
+        input: `1\n${projectId}\n\n\n`,
+        timeout: 30_000,
+      },
+    );
+    const output = `${result.stdout}\n${result.stderr}`;
+
+    assert.equal(result.status, 0, output);
+    assert.match(output, /Cancelled\./);
+    assert.doesNotMatch(output, /\[Confirmation\]/);
+    assert.doesNotMatch(output, /\[OK\] gh/);
+    assert.doesNotMatch(output, /\[Generate\]/);
+    await assert.rejects(access(destination));
+  } finally {
+    await rm(workingDirectory, { recursive: true, force: true });
+  }
+});
+
+test("confirmation EOF cancels without creating files", async () => {
+  const workingDirectory = await mkdtemp(
+    path.join(tmpdir(), "ibuki-confirm-eof-test-"),
+  );
+  const projectId = `ibuki-confirm-eof-${process.pid}`;
+  const destination = path.join(workingDirectory, projectId);
+
+  try {
+    const result = spawnSync(
+      "pwsh",
+      ["-NoProfile", "-File", bootstrapPath],
+      {
+        cwd: workingDirectory,
+        encoding: "utf8",
+        input: `1\n${projectId}\n\n\nn\n`,
+        timeout: 30_000,
+      },
+    );
+    const output = `${result.stdout}\n${result.stderr}`;
+
+    assert.equal(result.status, 0, output);
+    assert.match(output, /\[Confirmation\]/);
+    assert.match(output, /Cancelled\./);
+    assert.doesNotMatch(output, /\[Generate\]/);
+    await assert.rejects(access(destination));
+  } finally {
+    await rm(workingDirectory, { recursive: true, force: true });
+  }
+});
+
 test("destination is rechecked after confirmation and before the first write", async () => {
   const bootstrap = await import("node:fs/promises").then(({ readFile }) =>
     readFile(bootstrapPath, "utf8"),
