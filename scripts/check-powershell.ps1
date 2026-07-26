@@ -4,11 +4,20 @@ $ErrorActionPreference = 'Stop'
 
 $repositoryRoot = Split-Path $PSScriptRoot -Parent
 $scripts = @(
-    (Join-Path $repositoryRoot "bootstrap.ps1"),
-    (Join-Path $PSScriptRoot "check-powershell.ps1"),
-    (Join-Path $PSScriptRoot "test-generated-project.ps1"),
-    (Join-Path $repositoryRoot "blueprints/web-hono/template/scripts/doctor.ps1.tpl")
-)
+    (Join-Path $repositoryRoot "bootstrap.ps1")
+    Get-ChildItem -LiteralPath $PSScriptRoot -Filter "*.ps1" -File
+    Get-ChildItem `
+        -LiteralPath (Join-Path $repositoryRoot "blueprints") `
+        -Recurse `
+        -Filter "*.ps1.tpl" `
+        -File
+) | ForEach-Object {
+    if ($_ -is [System.IO.FileInfo]) {
+        $_.FullName
+    } else {
+        [string]$_
+    }
+} | Sort-Object -Unique
 
 $failed = $false
 

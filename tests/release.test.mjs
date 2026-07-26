@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { spawn, spawnSync } from "node:child_process";
+import {
+  access,
+  copyFile,
+  mkdtemp,
+  mkdir,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -75,6 +83,162 @@ function runWithMockedGitHubApi({
     timeout: 30_000,
   });
 }
+
+test("standalone script ignores an unrelated repository HEAD", async () => {
+  const fixture = await mkdtemp(path.join(os.tmpdir(), "ibuki-standalone-"));
+  const fixtureBootstrap = path.join(fixture, "bootstrap.ps1");
+  const remoteCommit = "1234567890abcdef1234567890abcdef12345678";
+  const runGit = (...arguments_) => {
+    const result = spawnSync(
+      "git",
+      [
+        "-c",
+        "user.name=Unrelated Test",
+        "-c",
+        "user.email=unrelated@example.invalid",
+        ...arguments_,
+      ],
+      { cwd: fixture, encoding: "utf8" },
+    );
+    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    return result.stdout.trim();
+  };
+
+  try {
+    await copyFile(bootstrapPath, fixtureBootstrap);
+    await writeFile(path.join(fixture, "unrelated.txt"), "not Ibuki\n", "utf8");
+    runGit("init", "-b", "main");
+    runGit("add", "unrelated.txt");
+    runGit("commit", "-m", "chore: unrelated repository");
+    const unrelatedCommit = runGit("rev-parse", "HEAD");
+    const escapedBootstrap = fixtureBootstrap.replaceAll("'", "''");
+    const command = `
+      function Invoke-RestMethod {
+          param([string]$Uri, [hashtable]$Headers)
+          if ($Uri -like "*/commits/main") {
+              return [PSCustomObject]@{ sha = "${remoteCommit}" }
+          }
+          if ($Uri -like "*/releases/latest") {
+              return [PSCustomObject]@{ tag_name = "v0.5.0" }
+          }
+          if ($Uri -like "*/commits/*") {
+              return [PSCustomObject]@{ sha = "${remoteCommit}" }
+          }
+          throw "Unexpected URI: $Uri"
+      }
+      & '${escapedBootstrap}'
+    `;
+    const result = spawnSync("pwsh", ["-NoProfile", "-Command", command], {
+      cwd: fixture,
+      encoding: "utf8",
+      input: "q\n",
+      timeout: 30_000,
+    });
+    const output = `${result.stdout}\n${result.stderr}`;
+
+    assert.equal(result.status, 0, output);
+    assert.match(output, /Commit ID\s+: 1234567890ab/);
+    assert.doesNotMatch(output, new RegExp(unrelatedCommit.slice(0, 12)));
+    assert.match(output, /Release\/Tag : v0\.5\.0/);
+    assert.match(output, /Cancelled\./);
+  } finally {
+    await rm(fixture, { recursive: true, force: true });
+  }
+});
+
+test("partial checkout displays remote metadata for a missing Blueprint", async () => {
+  const fixture = await mkdtemp(path.join(os.tmpdir(), "ibuki-partial-"));
+  const fixtureBootstrap = path.join(fixture, "bootstrap.ps1");
+  const localBlueprint = path.join(fixture, "blueprints", "web-hono");
+  const remoteCommit = "abcdef1234567890abcdef1234567890abcdef12";
+
+  try {
+    await copyFile(bootstrapPath, fixtureBootstrap);
+    await mkdir(localBlueprint, { recursive: true });
+    await writeFile(
+      path.join(localBlueprint, "manifest.json"),
+      '{"id":"web-hono"}\n',
+      "utf8",
+    );
+    const git = (...arguments_) =>
+      spawnSync(
+        "git",
+        [
+          "-c",
+          "user.name=Partial Test",
+          "-c",
+          "user.email=partial@example.invalid",
+          ...arguments_,
+        ],
+        { cwd: fixture, encoding: "utf8" },
+      );
+    assert.equal(git("init", "-b", "main").status, 0);
+    assert.equal(git("add", "--all").status, 0);
+    assert.equal(git("commit", "-m", "chore: partial checkout").status, 0);
+    assert.equal(git("tag", "v9.9.9").status, 0);
+    const localCommit = git("rev-parse", "HEAD").stdout.trim();
+    const escapedBootstrap = fixtureBootstrap.replaceAll("'", "''");
+    const destination = path.join(fixture, "generated").replaceAll("'", "''");
+    const command = `
+      function Invoke-RestMethod {
+          param([string]$Uri, [hashtable]$Headers)
+          if ($Uri -like "*/commits/main") {
+              return [PSCustomObject]@{ sha = "${remoteCommit}" }
+          }
+          if ($Uri -like "*/releases/latest") {
+              return [PSCustomObject]@{ tag_name = "v0.5.0" }
+          }
+          if ($Uri -like "*/commits/*") {
+              return [PSCustomObject]@{ sha = "${remoteCommit}" }
+          }
+          throw "Unexpected URI: $Uri"
+      }
+      & '${escapedBootstrap}' -Blueprint api-spring -ProjectId partial-test -DisplayName "Partial Test" -Destination '${destination}' -SkipGitHub -NonInteractive -Yes
+    `;
+    const child = spawn("pwsh", ["-NoProfile", "-Command", command], {
+      cwd: fixture,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const childClosed = new Promise((resolve) => child.once("close", resolve));
+    let output = "";
+
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        child.kill();
+        reject(new Error(`Timed out waiting for remote metadata.\n${output}`));
+      }, 30_000);
+      const inspect = (chunk) => {
+        output += chunk.toString();
+
+        if (output.includes(remoteCommit.slice(0, 12))) {
+          clearTimeout(timeout);
+          child.kill();
+          resolve();
+        }
+      };
+      child.stdout.on("data", inspect);
+      child.stderr.on("data", inspect);
+      child.on("error", (error) => {
+        clearTimeout(timeout);
+        reject(error);
+      });
+      child.on("exit", () => {
+        if (!output.includes(remoteCommit.slice(0, 12))) {
+          clearTimeout(timeout);
+          reject(new Error(`Process exited before remote metadata.\n${output}`));
+        }
+      });
+    });
+    await childClosed;
+
+    assert.match(output, /Release\/Tag : v0\.5\.0/);
+    assert.match(output, /Commit ID\s+: abcdef123456/);
+    assert.doesNotMatch(output, /Release\/Tag : v9\.9\.9/);
+    assert.doesNotMatch(output, new RegExp(localCommit.slice(0, 12)));
+  } finally {
+    await rm(fixture, { recursive: true, force: true });
+  }
+});
 
 test("release configuration publishes only from main without source commits", () => {
   assert.deepEqual(releaseConfig.branches, ["main"]);
@@ -270,4 +434,49 @@ test("release metadata lookup failure does not stamp a stale version", () => {
   assert.match(output, /Release\/Tag : unavailable/);
   assert.match(output, /Version : unavailable/);
   assert.match(output, /Project ID must start with a lowercase letter/);
+});
+
+test("remote Blueprint retrieval fails closed without an immutable commit", () => {
+  const result = runWithMockedGitHubApi({
+    fail: true,
+    mainCommit: "",
+    releaseCommit: "",
+    input: "1\nimmutable-test\n\n\nn\n",
+  });
+  const output = `${result.stdout}\n${result.stderr}`;
+
+  assert.notEqual(result.status, 0);
+  assert.match(output, /Unable to resolve an immutable Bootstrapper commit/);
+  assert.doesNotMatch(output, /\[Generate\]/);
+});
+
+test("standalone script also fails closed without an immutable commit", async () => {
+  const fixtureRoot = await mkdtemp(
+    path.join(os.tmpdir(), "ibuki-standalone-pin-"),
+  );
+  const scriptPath = path.join(fixtureRoot, "bootstrap.ps1");
+  const destination = path.join(fixtureRoot, "not-created");
+  const escapedScriptPath = scriptPath.replaceAll("'", "''");
+  const escapedDestination = destination.replaceAll("'", "''");
+
+  try {
+    await copyFile(bootstrapPath, scriptPath);
+    const command = [
+      "function Invoke-RestMethod { throw 'GitHub API unavailable' }",
+      `& '${escapedScriptPath}' -Blueprint web-hono -ProjectId standalone-pin-test -Destination '${escapedDestination}' -SkipGitHub -NonInteractive -Yes`,
+    ].join("\n");
+    const result = spawnSync("pwsh", ["-NoProfile", "-Command", command], {
+      cwd: fixtureRoot,
+      encoding: "utf8",
+      timeout: 30_000,
+    });
+    const output = `${result.stdout}\n${result.stderr}`;
+
+    assert.notEqual(result.status, 0);
+    assert.match(output, /Unable to resolve an immutable Bootstrapper commit/);
+    assert.doesNotMatch(output, /\[Generate\]/);
+    await assert.rejects(access(destination));
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
 });

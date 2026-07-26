@@ -2,8 +2,9 @@
 
 ## Purpose
 
-This repository contains Ibuki Bootstrapper. It generates a new React and Hono
-project, verifies it locally, and can provision a private GitHub repository.
+This repository contains Ibuki Bootstrapper. It generates React and Hono or
+Kotlin and Spring Boot projects, verifies them locally, and can provision a
+private GitHub repository.
 
 ## Environment
 
@@ -11,6 +12,7 @@ project, verifies it locally, and can provision a private GitHub repository.
 - PowerShell 7.6 or later
 - Node.js 24.10.0 or later
 - pnpm 11 or later
+- Eclipse Temurin JDK 17 (including `javac`)
 - Git for Windows
 - GitHub CLI
 
@@ -25,6 +27,10 @@ pnpm run test
 pnpm run test:generated
 pnpm run verify
 ```
+
+`pnpm run test:generated` and `pnpm run verify` generate both available
+Blueprints. The `api-spring` integration test therefore requires a real JDK 17;
+a JRE alone is not sufficient.
 
 ## Development rules
 
