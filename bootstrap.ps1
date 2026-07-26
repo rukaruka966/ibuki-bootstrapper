@@ -1278,6 +1278,88 @@ try {
 }
 }
 
+function ConvertTo-CoreParameterSplat {
+    param(
+        [object[]]$Arguments = @()
+    )
+
+    $definitions = @{
+        "blueprint" = @{ Name = "Blueprint"; IsSwitch = $false }
+        "projectid" = @{ Name = "ProjectId"; IsSwitch = $false }
+        "displayname" = @{ Name = "DisplayName"; IsSwitch = $false }
+        "destination" = @{ Name = "Destination"; IsSwitch = $false }
+        "repositoryname" = @{ Name = "RepositoryName"; IsSwitch = $false }
+        "repositorydescription" = @{ Name = "RepositoryDescription"; IsSwitch = $false }
+        "usecurrentdirectory" = @{ Name = "UseCurrentDirectory"; IsSwitch = $true }
+        "skipgithub" = @{ Name = "SkipGitHub"; IsSwitch = $true }
+        "noninteractive" = @{ Name = "NonInteractive"; IsSwitch = $true }
+        "yes" = @{ Name = "Yes"; IsSwitch = $true }
+    }
+    $parameters = @{}
+
+    for ($index = 0; $index -lt $Arguments.Count; $index++) {
+        $token = [string]$Arguments[$index]
+        $match = [regex]::Match($token, '^-([^:]+)(?::(.*))?$')
+
+        if (-not $match.Success) {
+            throw "Expected a named bootstrap parameter but found '$token'."
+        }
+
+        $lookupName = $match.Groups[1].Value.ToLowerInvariant()
+
+        if (-not $definitions.ContainsKey($lookupName)) {
+            throw "Unknown bootstrap parameter '$token'."
+        }
+
+        $definition = $definitions[$lookupName]
+        $parameterName = $definition.Name
+
+        if ($parameters.ContainsKey($parameterName)) {
+            throw "Bootstrap parameter '-$parameterName' was specified more than once."
+        }
+
+        if ($definition.IsSwitch) {
+            $switchValue = $true
+
+            if ($match.Groups[2].Success) {
+                $rawSwitchValue = $match.Groups[2].Value.ToLowerInvariant()
+
+                $switchValue = switch ($rawSwitchValue) {
+                    { $_ -in @('$true', 'true', '1') } { $true; break }
+                    { $_ -in @('$false', 'false', '0') } { $false; break }
+                    default {
+                        throw "Bootstrap switch '-$parameterName' requires true or false."
+                    }
+                }
+            }
+
+            $parameters[$parameterName] = $switchValue
+            continue
+        }
+
+        if ($match.Groups[2].Success) {
+            $parameters[$parameterName] = $match.Groups[2].Value
+            continue
+        }
+
+        $index++
+
+        if ($index -ge $Arguments.Count) {
+            throw "Bootstrap parameter '-$parameterName' requires a value."
+        }
+
+        $parameterValue = [string]$Arguments[$index]
+
+        if ($parameterValue -match '^-([^:]+)(?::(.*))?$') {
+            throw "Bootstrap parameter '-$parameterName' requires a value."
+        }
+
+        $parameters[$parameterName] = $parameterValue
+    }
+
+    return $parameters
+}
+
 $isPhysicalBootstrapFile = $false
 
 if (
@@ -1301,6 +1383,7 @@ if ($isInvokeExpression) {
     & $core -IsInvokeExpression $true
 } else {
     $fileArguments = @($RawArguments[0])
-    & $core -IsInvokeExpression $false @fileArguments
+    $fileParameters = ConvertTo-CoreParameterSplat -Arguments $fileArguments
+    & $core -IsInvokeExpression $false @fileParameters
 }
 } $PSScriptRoot $PSCommandPath (, $args)
