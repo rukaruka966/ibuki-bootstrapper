@@ -34,3 +34,11 @@ pnpm run doctor
 
 機能開発のPull Requestは`develop`を対象にします。リリース時は、検証済みの変更を
 `develop`から`main`へ反映します。
+
+## 開発ガイド
+
+- AI Agent向け開発ルール: [`AGENTS.md`](AGENTS.md)
+- 開発ルールの日本語版: [`docs/ja-JP/AGENTS-ja.md`](docs/ja-JP/AGENTS-ja.md)
+- UI・UX設計ルール: [`DESIGN.md`](DESIGN.md)
+- UI・UX設計ルールの日本語版:
+  [`docs/ja-JP/DESIGN-ja.md`](docs/ja-JP/DESIGN-ja.md)

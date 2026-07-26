@@ -1,5 +1,7 @@
 # AGENTS.md
 
+Japanese reference: [`docs/ja-JP/AGENTS-ja.md`](docs/ja-JP/AGENTS-ja.md)
+
 ## Project
 
 - ID: `__PROJECT_ID__`
@@ -55,3 +57,20 @@ Explain why and what changed.
 Stop for explicit confirmation before destructive file operations, data
 migrations, compatibility changes, secret exposure, or weaker repository
 protection.
+
+## Definition of Done
+
+A change is complete when all applicable items below are satisfied:
+
+- The requested behavior is implemented without unrelated scope changes.
+- Tests cover changed behavior and important failure paths.
+- `pnpm run lint`, `pnpm run test`, `pnpm run typecheck`, and
+  `pnpm run build` pass from the repository root.
+- `pnpm run smoke` passes when runtime integration or API behavior changes.
+- `pnpm run doctor` passes when dependencies, commands, or environment
+  requirements change.
+- Documentation and examples match changed commands, contracts, or workflows.
+- No secrets, local credentials, build output, or temporary files are tracked.
+- Destructive operations, persisted-data changes, compatibility breaks, and
+  weaker repository protection have explicit human approval.
+- Pull Request CI passes and all review conversations are resolved before merge.

@@ -1,6 +1,6 @@
 {
   "id": "web-hono",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "files": [
     { "source": "template/.env.example.tpl", "target": ".env.example", "template": true },
     { "source": "template/.gitattributes.tpl", "target": ".gitattributes", "template": false },
@@ -9,6 +9,8 @@
     { "source": "template/AGENTS.md.tpl", "target": "AGENTS.md", "template": true },
     { "source": "template/DESIGN.md.tpl", "target": "DESIGN.md", "template": false },
     { "source": "template/README.md.tpl", "target": "README.md", "template": true },
+    { "source": "template/docs/ja-JP/AGENTS-ja.md.tpl", "target": "docs/ja-JP/AGENTS-ja.md", "template": true },
+    { "source": "template/docs/ja-JP/DESIGN-ja.md.tpl", "target": "docs/ja-JP/DESIGN-ja.md", "template": false },
     { "source": "template/package.json.tpl", "target": "package.json", "template": true },
     { "source": "template/pnpm-workspace.yaml.tpl", "target": "pnpm-workspace.yaml", "template": false },
     { "source": "template/project.config.yaml.tpl", "target": "project.config.yaml", "template": true },
