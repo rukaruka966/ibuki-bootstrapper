@@ -8,7 +8,27 @@ $temporaryBase = if ($env:RUNNER_TEMP) {
 } else {
     [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
 }
-$testRoot = Join-Path $temporaryBase "ibuki-$([guid]::NewGuid())"
+$temporaryBase = $temporaryBase.TrimEnd(
+    [System.IO.Path]::DirectorySeparatorChar,
+    [System.IO.Path]::AltDirectorySeparatorChar
+)
+$maximumDestinationLength = 96
+$testRootName = "ibuki-$([guid]::NewGuid())"
+$paddingLength = $maximumDestinationLength - $temporaryBase.Length - 1 - $testRootName.Length
+
+if ($paddingLength -lt 0) {
+    throw (
+        "The temporary base path is too long to test the supported destination boundary: " +
+        "$temporaryBase"
+    )
+}
+
+$testRootName += "x" * $paddingLength
+$testRoot = Join-Path $temporaryBase $testRootName
+
+if ($testRoot.Length -ne $maximumDestinationLength) {
+    throw "Unable to create a $maximumDestinationLength-character generated test path: $testRoot"
+}
 
 try {
     & (Join-Path $repositoryRoot "bootstrap.ps1") `
@@ -26,6 +46,8 @@ try {
     $requiredPaths = @(
         "pnpm-lock.yaml",
         "project.config.yaml",
+        "docs/ja-JP/AGENTS-ja.md",
+        "docs/ja-JP/DESIGN-ja.md",
         "systems/web-frontend/dist/index.html",
         "systems/api-bff/dist/index.js"
     )
@@ -36,6 +58,27 @@ try {
         if (-not (Test-Path -LiteralPath $path)) {
             throw "Generated verification artifact is missing: $path"
         }
+    }
+
+    $generatedAgents = Get-Content -LiteralPath (Join-Path $testRoot "AGENTS.md") -Raw
+
+    if (
+        $generatedAgents -notmatch '(?m)^## Definition of Done$' -or
+        $generatedAgents -notmatch 'pnpm run typecheck' -or
+        $generatedAgents -notmatch 'explicit human approval'
+    ) {
+        throw "Generated AGENTS.md does not contain the required Definition of Done."
+    }
+
+    $generatedJapaneseAgents = Get-Content `
+        -LiteralPath (Join-Path $testRoot "docs/ja-JP/AGENTS-ja.md") `
+        -Raw
+
+    if (
+        $generatedJapaneseAgents -notmatch [regex]::Escape("Ibuki `"Test`" <Project>") -or
+        $generatedJapaneseAgents -match '__PROJECT_'
+    ) {
+        throw "Generated Japanese AGENTS reference was not rendered correctly."
     }
 
     & git -C $testRoot init -b main --quiet
