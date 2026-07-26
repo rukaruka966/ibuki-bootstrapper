@@ -323,7 +323,7 @@ function Resolve-BootstrapConfiguration {
                 return $null
             }
 
-            if ($resolvedDisplayName -eq "") {
+            if ([string]::IsNullOrWhiteSpace($resolvedDisplayName)) {
                 $resolvedDisplayName = $resolvedProjectId
             }
         }
