@@ -42,6 +42,7 @@ function runWithMockedGitHubApi({
   releaseCommit,
   releaseTag = "v0.3.0",
   fail = false,
+  input = "q\n",
 }) {
   const escapedBootstrapPath = bootstrapPath.replaceAll("'", "''");
   const mockBody = fail
@@ -69,7 +70,7 @@ function runWithMockedGitHubApi({
   return spawnSync("pwsh", ["-NoProfile", "-Command", command], {
     cwd: repositoryRoot,
     encoding: "utf8",
-    input: "q\n",
+    input,
     timeout: 30_000,
   });
 }
@@ -161,6 +162,20 @@ test("remote metadata marks main ahead of the latest release", () => {
   assert.match(output, /Release\/Tag : Unreleased \(latest: v0\.2\.0\)/);
   assert.match(output, /Commit ID\s+: aaaaaaaaaaaa/);
   assert.match(output, /Cancelled\./);
+});
+
+test("unreleased metadata keeps the latest release version for provenance", () => {
+  const result = runWithMockedGitHubApi({
+    mainCommit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    releaseCommit: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    releaseTag: "v0.3.0",
+    input: "1\nbad_name\n\n\nn\n",
+  });
+  const output = `${result.stdout}\n${result.stderr}`;
+
+  assert.match(output, /Release\/Tag : Unreleased \(latest: v0\.3\.0\)/);
+  assert.match(output, /Version : 0\.3\.0/);
+  assert.match(output, /Project ID must start with a lowercase letter/);
 });
 
 test("release metadata lookup failure is non-blocking", () => {

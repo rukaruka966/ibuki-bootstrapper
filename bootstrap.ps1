@@ -152,7 +152,7 @@ function ConvertTo-BootstrapperVersion {
         [string]$Tag
     )
 
-    if ($Tag -match '^v(?<Version>\d+\.\d+\.\d+)$') {
+    if ($Tag -match '(?:^v|latest:\s*v)(?<Version>\d+\.\d+\.\d+)(?:\)|$)') {
         return $Matches.Version
     }
 
