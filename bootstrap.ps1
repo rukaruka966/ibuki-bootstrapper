@@ -2036,6 +2036,7 @@ function Invoke-IbukiBootstrap {
 
 try {
     Invoke-IbukiBootstrap
+    $global:LASTEXITCODE = 0
 } catch {
     Write-Host ""
     Write-Host "Ibuki Bootstrapper failed." -ForegroundColor Red
