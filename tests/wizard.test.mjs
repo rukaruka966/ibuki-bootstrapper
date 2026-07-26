@@ -45,6 +45,9 @@ test("interactive wizard returns from unavailable choices and cancels safely", a
     const output = `${result.stdout}\n${result.stderr}`;
 
     assert.equal(result.status, 0, output);
+    assert.match(output, /Release\/Tag\s+:/);
+    assert.match(output, /Commit ID\s+:/);
+    assert.match(output, /Channel\s+:/);
     assert.match(output, /React \+ Hono \(available\)/);
     assert.match(output, /React \+ Hono \+ Spring Boot is Coming soon/);
     assert.match(output, /Web API: Spring Boot is Coming soon/);
