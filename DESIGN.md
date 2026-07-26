@@ -8,6 +8,8 @@ and accessible in both light and dark terminal themes.
 - Use plain text as the primary signal; color is supplementary.
 - Prefix phases with stable names such as `[Preflight]` and `[Generate]`.
 - Show the active GitHub account before external changes.
+- Show the source commit and its matching GitHub Release when available.
+- Treat release metadata lookup failures as non-blocking.
 - Show a complete summary before confirmation.
 - On failure, show the failed phase and the files already created.
 - Never print authentication tokens or secret values.
