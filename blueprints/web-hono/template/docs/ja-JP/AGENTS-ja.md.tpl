@@ -41,9 +41,18 @@ pnpm run doctor
 
 - デフォルトブランチは`main`です。
 - 通常の機能開発は`develop`から分岐し、`develop`へマージします。
-- リリースは`develop`から`main`へマージします。
+- 機能Pull Requestはsquash mergeで`develop`へ取り込みます。
+- `main`を対象にできるPull Requestは`develop`からのものだけです。
+- リリースPull Requestはmerge commitで`develop`から`main`へ取り込みます。
+- `main`へ直接入れる緊急経路は設けません。
 - Bootstrap完了後、`main`と`develop`への直接pushは禁止します。
 - Pull RequestにはCI成功と未解決レビュー会話の解消が必要です。
+- 両方の保護ブランチで`Quality`を必須とします。リリース元の検証は誤操作を
+  防ぎますが、Pull RequestがWorkflowを変更できるためsecurity boundaryでは
+  ありません。
+- `main`ではrequired checkのstrictを無効にし、release merge commit後の
+  `develop`への逆同期を不要にします。`develop`ではstrictを有効にし、機能Pull
+  Requestを常に最新の`develop`を基準として検証します。
 
 Conventional Commitはスコープなしで記述します。
 

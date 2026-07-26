@@ -80,6 +80,20 @@ Windows上のpnpm依存解決を安定させるため、正規化後の生成先
 Rulesetでは、Pull Request、未解決スレッドの解消、`Quality`ステータスチェックを
 必須とし、ブランチ削除とforce-pushを禁止します。
 
+機能ブランチから`develop`へはsquash merge、`develop`から`main`へはmerge
+commitを使用します。`main`を対象にできるPull Requestは`develop`からのものだけ
+です。Repository全体では両方式を有効にし、各Rulesetで使用方式を限定します。
+`main`へ直接入れる緊急経路は設けません。
+
+`main`と`develop`では`Quality`を必須とします。`Quality`は`main`向けPull
+Requestが同一Repositoryの`develop`から来たことも検証します。ただしPull Requestは
+Workflow自体を変更できるため、この検証は個人開発での誤操作防止であり、悪意ある
+変更に対するsecurity boundaryではありません。
+
+`main`のstatus checkはstrictを無効にし、release merge commit後に`main`を
+`develop`へ逆同期する作業を不要にします。`develop`ではstrictを有効にし、機能Pull
+Requestを常に最新の`develop`を基準として検証します。
+
 ## IbukiのRelease
 
 `main`の`Quality`が成功すると、semantic-releaseがConventional Commitから

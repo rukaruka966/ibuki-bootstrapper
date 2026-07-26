@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -135,6 +136,51 @@ test("Conventional Commits produce the expected release types", async () => {
     ),
     "major",
   );
+});
+
+test("release analysis reads feature commits through a real no-ff merge", async () => {
+  const gitRoot = await mkdtemp(path.join(os.tmpdir(), "ibuki-release-test-"));
+  const runGit = (...arguments_) => {
+    const result = spawnSync(
+      "git",
+      ["-c", "user.name=Ibuki Test", "-c", "user.email=ibuki@example.invalid", ...arguments_],
+      { cwd: gitRoot, encoding: "utf8" },
+    );
+    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    return result.stdout.trim();
+  };
+
+  try {
+    runGit("init", "-b", "main");
+    await writeFile(path.join(gitRoot, "fixture.txt"), "base\n", "utf8");
+    runGit("add", "fixture.txt");
+    runGit("commit", "-m", "chore: establish release baseline");
+    runGit("tag", "v0.1.0");
+    runGit("switch", "-c", "develop");
+    await writeFile(path.join(gitRoot, "fixture.txt"), "base\nfeature\n", "utf8");
+    runGit("add", "fixture.txt");
+    runGit("commit", "-m", "feat: add generated policy");
+    runGit("switch", "main");
+    runGit("merge", "--no-ff", "develop", "-m", "Merge develop into main");
+
+    const hashes = runGit("rev-list", "--reverse", "v0.1.0..HEAD")
+      .split(/\r?\n/)
+      .filter(Boolean);
+    const commits = hashes.map((hash) => ({
+      hash,
+      message: runGit("show", "-s", "--format=%B", hash),
+    }));
+    const releaseType = await analyzeCommits(
+      getPluginConfiguration("@semantic-release/commit-analyzer"),
+      { commits, cwd: gitRoot, logger: silentLogger },
+    );
+
+    assert.equal(commits.length, 2);
+    assert.match(commits.at(-1).message, /Merge develop into main/);
+    assert.equal(releaseType, "minor");
+  } finally {
+    await rm(gitRoot, { recursive: true, force: true });
+  }
 });
 
 test("release workflow waits for Quality and has minimal write permission", async () => {

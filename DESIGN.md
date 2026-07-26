@@ -29,3 +29,18 @@ dashboard.
   asynchronous behavior.
 - Keep the starter screen intentionally minimal so product work can replace it
   without removing decorative sample code.
+
+## Git history
+
+- Squash feature pull requests into `develop`.
+- Merge `develop` pull requests into `main` with a merge commit.
+- Permit only `develop` to target `main`; do not provide a direct-main
+  emergency path.
+- Keep feature commits visible to semantic-release through the release merge
+  topology.
+- Use the source gate in `Quality` to prevent accidental release Pull Requests.
+  It is not a security boundary because a Pull Request can modify its Workflow.
+- Keep required checks non-strict on `main` so release merge commits need no
+  reverse synchronization into `develop`.
+- Keep required checks strict on `develop` so feature Pull Requests are tested
+  against its latest state.

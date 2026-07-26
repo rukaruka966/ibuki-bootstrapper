@@ -30,3 +30,13 @@
 - 確認前に、対象と影響を明示する。
 - 破壊的な選択肢を初期選択しない。
 - 失敗後に復旧情報を残す。
+
+## Git履歴
+
+- 機能Pull Requestはsquash mergeで`develop`へ取り込む。
+- `develop`だけをmerge commitで`main`へ取り込む。
+- `main`へ直接入れる緊急経路は作らない。
+- リリース元の検証は誤操作防止として使用する。Pull RequestがWorkflowを変更
+  できるため、悪意ある変更に対するsecurity boundaryとはみなさない。
+- required checkのstrictは`main`で無効にしてrelease merge commit後の逆同期を
+  不要にし、`develop`で有効にして機能Pull Requestを最新状態で検証する。
