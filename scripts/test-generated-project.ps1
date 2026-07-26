@@ -8,7 +8,27 @@ $temporaryBase = if ($env:RUNNER_TEMP) {
 } else {
     [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
 }
-$testRoot = Join-Path $temporaryBase "ibuki-$([guid]::NewGuid())"
+$temporaryBase = $temporaryBase.TrimEnd(
+    [System.IO.Path]::DirectorySeparatorChar,
+    [System.IO.Path]::AltDirectorySeparatorChar
+)
+$maximumDestinationLength = 96
+$testRootName = "ibuki-$([guid]::NewGuid())"
+$paddingLength = $maximumDestinationLength - $temporaryBase.Length - 1 - $testRootName.Length
+
+if ($paddingLength -lt 0) {
+    throw (
+        "The temporary base path is too long to test the supported destination boundary: " +
+        "$temporaryBase"
+    )
+}
+
+$testRootName += "x" * $paddingLength
+$testRoot = Join-Path $temporaryBase $testRootName
+
+if ($testRoot.Length -ne $maximumDestinationLength) {
+    throw "Unable to create a $maximumDestinationLength-character generated test path: $testRoot"
+}
 
 try {
     & (Join-Path $repositoryRoot "bootstrap.ps1") `
