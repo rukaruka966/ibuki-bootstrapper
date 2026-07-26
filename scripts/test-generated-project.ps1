@@ -46,6 +46,8 @@ try {
     $requiredPaths = @(
         "pnpm-lock.yaml",
         "project.config.yaml",
+        ".github/workflows/ci.yml",
+        "scripts/check-pr-branch-policy.mjs",
         "docs/ja-JP/AGENTS-ja.md",
         "docs/ja-JP/DESIGN-ja.md",
         "systems/web-frontend/dist/index.html",
@@ -76,9 +78,64 @@ try {
 
     if (
         $generatedJapaneseAgents -notmatch [regex]::Escape("Ibuki `"Test`" <Project>") -or
-        $generatedJapaneseAgents -match '__PROJECT_'
+        $generatedJapaneseAgents -match '__PROJECT_' -or
+        $generatedJapaneseAgents -notmatch 'squash merge' -or
+        $generatedJapaneseAgents -notmatch 'merge commit' -or
+        $generatedJapaneseAgents -notmatch 'main.*develop' -or
+        $generatedJapaneseAgents -notmatch 'strictを無効' -or
+        $generatedJapaneseAgents -notmatch 'strictを有効'
     ) {
         throw "Generated Japanese AGENTS reference was not rendered correctly."
+    }
+
+    if (
+        $generatedAgents -notmatch 'squash merge' -or
+        $generatedAgents -notmatch 'merge commit' -or
+        $generatedAgents -notmatch 'Only `develop` may open' -or
+        $generatedAgents -notmatch 'non-strict on `main`' -or
+        $generatedAgents -notmatch 'strict on `develop`'
+    ) {
+        throw "Generated AGENTS.md does not contain the required merge policy."
+    }
+
+    $generatedWorkflow = Get-Content `
+        -LiteralPath (Join-Path $testRoot ".github/workflows/ci.yml") `
+        -Raw
+
+    if (
+        $generatedWorkflow -notmatch 'node scripts/check-pr-branch-policy\.mjs' -or
+        $generatedWorkflow -notmatch 'GITHUB_BASE_REPOSITORY' -or
+        $generatedWorkflow -notmatch 'GITHUB_HEAD_REPOSITORY' -or
+        $generatedWorkflow -notmatch 'head\.repo\.full_name'
+    ) {
+        throw "Generated CI does not enforce the Pull Request branch policy."
+    }
+
+    $policyScript = Join-Path $testRoot "scripts/check-pr-branch-policy.mjs"
+    $env:GITHUB_EVENT_NAME = "pull_request"
+    $env:GITHUB_BASE_REF = "main"
+    $env:GITHUB_HEAD_REF = "develop"
+    $env:GITHUB_BASE_REPOSITORY = "owner/project"
+    $env:GITHUB_HEAD_REPOSITORY = "owner/project"
+    & node $policyScript
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "Generated policy rejected the trusted develop branch."
+    }
+
+    $env:GITHUB_HEAD_REPOSITORY = "fork-owner/project"
+    $previousNativeErrorPreference = $PSNativeCommandUseErrorActionPreference
+    $PSNativeCommandUseErrorActionPreference = $false
+
+    try {
+        & node $policyScript 2>$null
+        $forkPolicyExitCode = $LASTEXITCODE
+    } finally {
+        $PSNativeCommandUseErrorActionPreference = $previousNativeErrorPreference
+    }
+
+    if ($forkPolicyExitCode -eq 0) {
+        throw "Generated policy accepted a fork develop branch."
     }
 
     & git -C $testRoot init -b main --quiet

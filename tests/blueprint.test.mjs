@@ -39,6 +39,24 @@ test("every manifest source exists and uses LF", async () => {
   }
 });
 
+test("root and generated pull request policies stay identical", async () => {
+  const rootPolicy = await readFile(
+    path.join(repositoryRoot, "scripts", "check-pr-branch-policy.mjs"),
+    "utf8",
+  );
+  const generatedPolicy = await readFile(
+    path.join(
+      blueprintRoot,
+      "template",
+      "scripts",
+      "check-pr-branch-policy.mjs.tpl",
+    ),
+    "utf8",
+  );
+
+  assert.equal(generatedPolicy, rootPolicy);
+});
+
 test("template files use only supported tokens", async () => {
   const manifest = await readManifest();
   const supportedTokens = new Set([
@@ -172,8 +190,23 @@ test("repository provisioning verifies ruleset details and final branch", async 
   assert.match(bootstrap, /function Assert-ProtectionRuleset/);
   assert.match(bootstrap, /required_review_thread_resolution/);
   assert.match(bootstrap, /required_approving_review_count -ne 0/);
-  assert.match(bootstrap, /allowedMergeMethods -notcontains "squash"/);
-  assert.match(bootstrap, /requiredContexts -notcontains "Quality"/);
+  assert.match(bootstrap, /allowedMergeMethods -notcontains \$ExpectedMergeMethod/);
+  assert.match(bootstrap, /-RequiredContexts @\("Quality"\)/);
+  assert.match(bootstrap, /allow_merge_commit=true/);
+  assert.match(bootstrap, /Repository merge settings verification failed/);
+  assert.match(bootstrap, /includedRefs\.Count -ne 1/);
+  assert.match(bootstrap, /excludedRefs\.Count -ne 0/);
+  assert.match(bootstrap, /default_branch -ne "main"/);
+  assert.match(bootstrap, /delete_branch_on_merge/);
+  assert.match(bootstrap, /Compare-Object/);
+  assert.match(bootstrap, /unexpected required status checks/);
+  assert.match(bootstrap, /ruleTypes\.Count -ne \$expectedRuleTypes\.Count/);
+  assert.match(bootstrap, /unexpected or duplicate rule types/);
   assert.match(bootstrap, /strict_required_status_checks_policy/);
+  assert.match(bootstrap, /-StrictRequiredChecks \$false/);
+  assert.match(bootstrap, /-StrictRequiredChecks \$true/);
+  assert.match(bootstrap, /-ExpectedStrictRequiredChecks \$false/);
+  assert.match(bootstrap, /-ExpectedStrictRequiredChecks \$true/);
+  assert.match(bootstrap, /unexpected strict status check policy/);
   assert.match(bootstrap, /currentBranch -ne "develop"/);
 });

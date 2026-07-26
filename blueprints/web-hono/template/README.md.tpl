@@ -32,8 +32,14 @@ pnpm run doctor
 
 ## リポジトリ運用
 
-機能開発のPull Requestは`develop`を対象にします。リリース時は、検証済みの変更を
-`develop`から`main`へ反映します。
+機能開発のPull Requestは`develop`を対象にし、squash mergeで取り込みます。
+`main`を対象にできるPull Requestは`develop`からのものだけで、リリース時に
+merge commitで取り込みます。`main`へ直接入れる緊急経路は設けません。
+`Quality`は、同一Repositoryの`develop`からのPull Requestであることも検証します。
+ただし、これは個人開発での誤操作防止であり、悪意ある変更に対するsecurity
+boundaryではありません。
+`main`ではrequired checkのstrictを無効にしてrelease merge commit後の逆同期を
+不要にし、`develop`では有効にして機能Pull Requestを最新状態で検証します。
 
 ## 開発ガイド
 
