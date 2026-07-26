@@ -11,6 +11,8 @@ and accessible in both light and dark terminal themes.
 - Show a complete summary before confirmation.
 - On failure, show the failed phase and the files already created.
 - Never print authentication tokens or secret values.
+- Reject destination paths longer than 96 characters before confirmation or
+  file creation to avoid unreliable dependency resolution on Windows.
 
 ## Generated web application
 

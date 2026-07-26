@@ -98,6 +98,47 @@ test("non-interactive mode rejects an unavailable blueprint before generation", 
   }
 });
 
+test("destination paths longer than 96 characters are rejected before generation", async () => {
+  const workingDirectory = await mkdtemp(
+    path.join(tmpdir(), "ibuki-long-path-test-"),
+  );
+  const destination = path.join(workingDirectory, "x".repeat(150));
+
+  try {
+    const result = spawnSync(
+      "pwsh",
+      [
+        "-NoProfile",
+        "-File",
+        bootstrapPath,
+        "-ProjectId",
+        "long-path-test",
+        "-Destination",
+        destination,
+        "-SkipGitHub",
+        "-NonInteractive",
+        "-Yes",
+      ],
+      {
+        cwd: workingDirectory,
+        encoding: "utf8",
+        timeout: 30_000,
+      },
+    );
+    const output = `${result.stdout}\n${result.stderr}`;
+
+    assert.notEqual(result.status, 0);
+    assert.match(output, /Destination path is too long/);
+    assert.match(output, /maximum 96/);
+    assert.match(output, /Choose a shorter destination/);
+    assert.doesNotMatch(output, /\[Confirmation\]/);
+    assert.doesNotMatch(output, /\[Generate\]/);
+    await assert.rejects(access(destination));
+  } finally {
+    await rm(workingDirectory, { recursive: true, force: true });
+  }
+});
+
 test("interactive wizard can cancel after a Coming soon choice", async () => {
   const workingDirectory = await mkdtemp(
     path.join(tmpdir(), "ibuki-wizard-cancel-test-"),

@@ -51,6 +51,7 @@ $state = [PSCustomObject]@{
     CreatedRepository = ""
     CurrentPhase = "Start"
     CancelRequested = $false
+    MaximumDestinationLength = 96
 }
 
 function Write-Phase {
@@ -393,6 +394,16 @@ function Assert-BootstrapConfiguration {
 
     if ($Configuration.DisplayName -match "[`r`n]") {
         throw "Display name cannot contain newlines."
+    }
+
+    $destinationLength = $Configuration.Destination.Length
+
+    if ($destinationLength -gt $state.MaximumDestinationLength) {
+        throw (
+            "Destination path is too long ($destinationLength characters; " +
+            "maximum $($state.MaximumDestinationLength)). " +
+            "Choose a shorter destination, such as C:\workspace\$($Configuration.ProjectId)."
+        )
     }
 
     if (-not (Test-EmptyDirectory -Path $Configuration.Destination)) {
