@@ -22,7 +22,6 @@ test("interactive wizard returns from unavailable choices and cancels safely", a
   try {
     const input = [
       "2",
-      "3",
       "invalid",
       "1",
       projectId,
@@ -50,7 +49,7 @@ test("interactive wizard returns from unavailable choices and cancels safely", a
     assert.match(output, /Channel\s+:/);
     assert.match(output, /React \+ Hono \(available\)/);
     assert.match(output, /React \+ Hono \+ Spring Boot is Coming soon/);
-    assert.match(output, /Web API: Spring Boot is Coming soon/);
+    assert.match(output, /Web API: Spring Boot \(available\)/);
     assert.match(output, /Unknown selection 'invalid'/);
     assert.match(output, /Blueprint ID\s+: web-hono/);
     assert.match(output, /GitHub\s+: skipped/);
@@ -95,6 +94,52 @@ test("non-interactive mode rejects an unavailable blueprint before generation", 
 
     assert.notEqual(result.status, 0);
     assert.match(output, /Blueprint 'spring-boot' is not available/);
+    await assert.rejects(access(destination));
+  } finally {
+    await rm(workingDirectory, { recursive: true, force: true });
+  }
+});
+
+test("api-spring rejects JAVA_HOME that differs from PATH JDK", async () => {
+  const workingDirectory = await mkdtemp(
+    path.join(tmpdir(), "ibuki-java-home-test-"),
+  );
+  const destination = path.join(workingDirectory, "not-created");
+
+  try {
+    const result = spawnSync(
+      "pwsh",
+      [
+        "-NoProfile",
+        "-File",
+        bootstrapPath,
+        "-Yes",
+        "-Destination",
+        destination,
+        "-ProjectId",
+        "java-home-test",
+        "-SkipGitHub",
+        "-NonInteractive",
+        "-Blueprint",
+        "api-spring",
+      ],
+      {
+        cwd: workingDirectory,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          JAVA_HOME: path.join(workingDirectory, "different-jdk"),
+        },
+        timeout: 30_000,
+      },
+    );
+    const output = `${result.stdout}\n${result.stderr}`;
+
+    assert.notEqual(result.status, 0);
+    assert.match(
+      output,
+      /JAVA_HOME must reference the same JDK 17 used by java and javac/,
+    );
     await assert.rejects(access(destination));
   } finally {
     await rm(workingDirectory, { recursive: true, force: true });
@@ -290,8 +335,8 @@ test("manifest entries are fully validated before the first generated write", as
   );
 
   assert.ok(validatorIndex >= 0);
-  assert.match(bootstrap, /contains an unsafe source path/);
-  assert.match(bootstrap, /contains an unsafe target path/);
+  assert.match(bootstrap, /unsafe \$Label path/);
+  assert.match(bootstrap, /Assert-SafeBlueprintRelativePath/);
   assert.match(bootstrap, /contains a duplicate target/);
   assert.match(bootstrap, /has a non-boolean template flag/);
   assert.match(bootstrap, /source -isnot \[string\]/);
@@ -322,15 +367,49 @@ test("local and remote blueprint content paths are explicitly separated", async 
   assert.equal(bootstrap.includes(".ibuki-remote-source"), false);
 });
 
-test("PowerShell, Node.js, and pnpm minimum versions are explicitly enforced", async () => {
+test("PowerShell and Blueprint-specific toolchains are explicitly enforced", async () => {
   const bootstrap = await import("node:fs/promises").then(({ readFile }) =>
     readFile(bootstrapPath, "utf8"),
   );
+  const webManifest = JSON.parse(
+    await import("node:fs/promises").then(({ readFile }) =>
+      readFile(
+        path.join(repositoryRoot, "blueprints", "web-hono", "manifest.json"),
+        "utf8",
+      ),
+    ),
+  );
+  const springManifest = JSON.parse(
+    await import("node:fs/promises").then(({ readFile }) =>
+      readFile(
+        path.join(repositoryRoot, "blueprints", "api-spring", "manifest.json"),
+        "utf8",
+      ),
+    ),
+  );
 
   assert.match(bootstrap, /PSVersionTable\.PSVersion -lt \[version\]"7\.6"/);
-  assert.match(
-    bootstrap,
-    /nodeSemanticVersion -lt \[version\]"24\.10\.0"/,
+  assert.match(bootstrap, /function Assert-BlueprintToolchains/);
+  assert.deepEqual(
+    webManifest.toolchains.map(({ id, minimumVersion }) => [
+      id,
+      minimumVersion,
+    ]),
+    [
+      ["node", "24.10.0"],
+      ["pnpm", "11.0.0"],
+      ["git", "2.0.0"],
+    ],
   );
-  assert.match(bootstrap, /pnpmMajor -lt 11/);
+  assert.deepEqual(
+    springManifest.toolchains.map(({ id, minimumVersion, requiredMajor }) => [
+      id,
+      minimumVersion,
+      requiredMajor,
+    ]),
+    [
+      ["java", "17.0.0", 17],
+      ["javac", "17.0.0", 17],
+    ],
+  );
 });

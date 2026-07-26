@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 2,
+  "id": "api-spring",
+  "displayName": "Web API: Spring Boot",
+  "version": "0.5.0",
+  "toolchains": [
+    {
+      "id": "java",
+      "command": "java",
+      "versionArguments": ["-version"],
+      "minimumVersion": "17.0.0",
+      "requiredMajor": 17,
+      "versionPattern": "version \"(\\d+\\.\\d+\\.\\d+)"
+    },
+    {
+      "id": "javac",
+      "command": "javac",
+      "versionArguments": ["-version"],
+      "minimumVersion": "17.0.0",
+      "requiredMajor": 17,
+      "versionPattern": "(\\d+\\.\\d+\\.\\d+)"
+    }
+  ],
+  "verification": [
+    { "command": "./gradlew.bat", "arguments": ["check"], "workingDirectory": "systems/api-server" },
+    { "command": "./gradlew.bat", "arguments": ["bootJar"], "workingDirectory": "systems/api-server" },
+    {
+      "command": "pwsh",
+      "arguments": ["-NoProfile", "-File", "./scripts/smoke.ps1"],
+      "workingDirectory": "systems/api-server"
+    }
+  ],
+  "files": [
+    { "source": "template/.gitattributes.tpl", "target": ".gitattributes", "kind": "text", "template": false },
+    { "source": "template/.gitignore.tpl", "target": ".gitignore", "kind": "text", "template": false },
+    { "source": "template/AGENTS.md.tpl", "target": "AGENTS.md", "kind": "text", "template": true },
+    { "source": "template/DESIGN.md.tpl", "target": "DESIGN.md", "kind": "text", "template": false },
+    { "source": "template/README.md.tpl", "target": "README.md", "kind": "text", "template": true },
+    { "source": "template/project.config.yaml.tpl", "target": "project.config.yaml", "kind": "text", "template": true },
+    { "source": "template/build.gradle.kts.tpl", "target": "systems/api-server/build.gradle.kts", "kind": "text", "template": false },
+    { "source": "template/settings.gradle.kts.tpl", "target": "systems/api-server/settings.gradle.kts", "kind": "text", "template": true },
+    { "source": "template/gradlew", "target": "systems/api-server/gradlew", "kind": "text", "template": false },
+    { "source": "template/gradlew.bat", "target": "systems/api-server/gradlew.bat", "kind": "text", "template": false },
+    {
+      "source": "template/gradle/wrapper/gradle-wrapper.jar",
+      "target": "systems/api-server/gradle/wrapper/gradle-wrapper.jar",
+      "kind": "binary",
+      "template": false,
+      "sha256": "497c8c2a7e5031f6aa847f88104aa80a93532ec32ee17bdb8d1d2f67a194a9c7"
+    },
+    { "source": "template/gradle/wrapper/gradle-wrapper.properties.tpl", "target": "systems/api-server/gradle/wrapper/gradle-wrapper.properties", "kind": "text", "template": false },
+    { "source": "template/.github/workflows/ci.yml.tpl", "target": ".github/workflows/ci.yml", "kind": "text", "template": false },
+    { "source": "template/docs/ja-JP/AGENTS-ja.md.tpl", "target": "docs/ja-JP/AGENTS-ja.md", "kind": "text", "template": true },
+    { "source": "template/docs/ja-JP/DESIGN-ja.md.tpl", "target": "docs/ja-JP/DESIGN-ja.md", "kind": "text", "template": false },
+    { "source": "template/scripts/smoke.ps1.tpl", "target": "systems/api-server/scripts/smoke.ps1", "kind": "text", "template": false },
+    { "source": "template/src/main/kotlin/com/example/application/Application.kt.tpl", "target": "systems/api-server/src/main/kotlin/com/example/application/Application.kt", "kind": "text", "template": false },
+    { "source": "template/src/main/kotlin/com/example/application/HealthController.kt.tpl", "target": "systems/api-server/src/main/kotlin/com/example/application/HealthController.kt", "kind": "text", "template": false },
+    { "source": "template/src/main/kotlin/com/example/application/ApiExceptionHandler.kt.tpl", "target": "systems/api-server/src/main/kotlin/com/example/application/ApiExceptionHandler.kt", "kind": "text", "template": false },
+    { "source": "template/src/main/resources/application.yaml.tpl", "target": "systems/api-server/src/main/resources/application.yaml", "kind": "text", "template": false },
+    { "source": "template/src/test/kotlin/com/example/application/ApiApplicationTests.kt.tpl", "target": "systems/api-server/src/test/kotlin/com/example/application/ApiApplicationTests.kt", "kind": "text", "template": false }
+  ]
+}

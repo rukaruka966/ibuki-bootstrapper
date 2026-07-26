@@ -1,7 +1,7 @@
 # Ibuki Bootstrapper
 
-Ibukiは、ReactフロントエンドとHono BFFで構成される最小プロジェクトを生成する
-Bootstrapperです。
+Ibukiは、React + HonoまたはKotlin + Spring Bootで構成される最小プロジェクトを
+生成するBootstrapperです。
 
 生成後にローカルでlint・テスト・型検査・ビルド・疎通確認を実行します。
 必要に応じて、保護された`main`・`develop`ブランチを持つPrivate GitHub
@@ -15,10 +15,18 @@ Ibuki自身の変更履歴は
 
 - Windows 11
 - PowerShell 7.6以降
-- Node.js 24.10.0以降
-- pnpm 11以降
 - Git for Windows
 - `gh auth login`で認証済みのGitHub CLI
+
+選択したBlueprintに応じて、次のToolchainだけを追加で使用します。
+
+| Blueprint | 必要なToolchain |
+| --- | --- |
+| `web-hono` | Node.js 24.10.0以降、pnpm 11以降 |
+| `api-spring` | `java`と`javac`を含むJDK 17 |
+
+`api-spring`ではNode.jsとpnpmを生成要件にしません。JDK 17.0.1+12でも互換確認を
+行いますが、通常は最新のセキュリティ更新が適用されたJDK 17を使用してください。
 
 ## 実行方法
 
@@ -29,10 +37,10 @@ Ibuki自身の変更履歴は
 irm https://raw.githubusercontent.com/rukaruka966/ibuki-bootstrapper/main/bootstrap.ps1 | iex
 ```
 
-現時点で生成できる構成は`web-hono`（React + Hono）です。
-React + Hono + Spring Boot、Spring Boot単独のWeb API、Android、
-Windows Desktopは選択肢に表示されますが、`Coming soon`として生成せず
-構成選択へ戻ります。
+現時点で生成できる構成は、`web-hono`（React + Hono）と
+`api-spring`（Kotlin + Spring Boot Web API）です。React + Hono +
+Spring Boot、Android、Windows Desktopは選択肢に表示されますが、
+`Coming soon`として生成せず構成選択へ戻ります。
 
 公開スクリプトには認証情報を含みません。Privateリポジトリを作成する場合だけ、
 GitHub CLIに保存されている認証情報をGitHub CLI自身が使用します。
@@ -58,6 +66,19 @@ pwsh ./bootstrap.ps1 `
   -Yes
 ```
 
+Spring Boot Web APIを生成する場合:
+
+```powershell
+pwsh ./bootstrap.ps1 `
+  -Blueprint api-spring `
+  -ProjectId sample-api `
+  -DisplayName "Sample API" `
+  -Destination ./sample-api `
+  -SkipGitHub `
+  -NonInteractive `
+  -Yes
+```
+
 非対話実行でも、引数は対話ウィザードと同じ共通設定へ変換・検証されます。
 既存のコマンドとの互換性のため、`-Blueprint`を省略した場合は`web-hono`です。
 
@@ -66,6 +87,8 @@ Windows上のpnpm依存解決を安定させるため、正規化後の生成先
 `C:\workspace\<project-id>`のような短い生成先を案内します。
 
 ## 生成される構成
+
+`web-hono`:
 
 - React・TypeScript・Viteフロントエンド
 - Hono・TypeScript BFF
@@ -76,6 +99,18 @@ Windows上のpnpm依存解決を安定させるため、正規化後の生成先
 - 単体テスト・型検査・ビルド・実行時スモークテスト
 - Private GitHubリポジトリの作成
 - `main`・`develop`ブランチの作成とRuleset設定
+
+`api-spring`:
+
+- Kotlin・Spring Boot 4.1.0 Web API
+- Gradle Kotlin DSL・Gradle Wrapper・Java Toolchain 17
+- `systems/api-server`単独でのtest・executable jar生成
+- `/internal/health`ヘルスチェック
+- `application/problem+json`形式の404レスポンス
+- 起動・HTTP疎通・プロセス終了まで行うスモークテスト
+- JDK 17を使用するGitHub Actions `Quality`
+- `AGENTS.md`・`DESIGN.md`と日本語参考版
+- `project.config.yaml`への構成・port・Bootstrapper version記録
 
 Rulesetでは、Pull Request、未解決スレッドの解消、`Quality`ステータスチェックを
 必須とし、ブランチ削除とforce-pushを禁止します。
@@ -101,8 +136,10 @@ Requestを常に最新の`develop`を基準として検証します。
 npm packageの公開やRelease用のソースCommitは行いません。
 
 Bootstrapperの開始時には、実行しているCommitとGitHub Releaseの対応を表示します。
-`main`が最新Releaseより先に進んでいる場合は`Unreleased`、GitHub APIから情報を
-取得できない場合は`unavailable`と表示し、プロジェクト生成は継続します。
+`main`が最新Releaseより先に進んでいる場合は`Unreleased`と表示します。Release情報
+だけを取得できない場合は`unavailable`と表示して生成を継続します。ただしremote実行
+で`main`のCommit自体を解決できない場合は、Manifestとassetを同一Commitから取得する
+保証ができないため、ファイル生成前に停止します。
 
 Repository内の[CHANGELOG.md](CHANGELOG.md)は、変更履歴の正本である
 GitHub Releasesへの案内板です。
@@ -114,7 +151,6 @@ GitHub Releasesへの案内板です。
 - PostgreSQL・Redis
 - Docker
 - Web: React + Hono + Spring Boot
-- Web API: Spring Boot
 - Android: Jetpack Compose
 - Windows Desktop: Compose Multiplatform
 - 認証・認可
