@@ -104,7 +104,7 @@ test("Bootstrapper and package versions stay synchronized", async () => {
     "utf8",
   );
   const versionMatch = bootstrap.match(
-    /\$script:BootstrapperVersion = "([^"]+)"/,
+    /BootstrapperVersion = "([^"]+)"/,
   );
 
   assert.notEqual(versionMatch, null);

@@ -1,5 +1,16 @@
+# IBUKI_BOOTSTRAPPER_ENTRYPOINT_V1
+& {
+param(
+    [string]$BootstrapRoot,
+    [string]$InvocationPath,
+    [object[]]$RawArguments
+)
+
+$core = {
 [CmdletBinding()]
 param(
+    [Parameter(DontShow)]
+    [bool]$IsInvokeExpression,
     [string]$Blueprint,
     [string]$ProjectId,
     [string]$DisplayName,
@@ -12,18 +23,35 @@ param(
     [switch]$Yes
 )
 
+$previousConsoleOutputEncoding = [Console]::OutputEncoding
+$lastExitCodeVariable = if ($IsInvokeExpression) {
+    Get-Variable -Name LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue
+} else {
+    $null
+}
+$lastExitCodeExisted = $null -ne $lastExitCodeVariable
+$previousLastExitCode = if ($lastExitCodeExisted) {
+    $lastExitCodeVariable.Value
+} else {
+    $null
+}
+
+try {
 $utf8WithoutBom = [System.Text.UTF8Encoding]::new($false)
 [Console]::OutputEncoding = $utf8WithoutBom
 $OutputEncoding = $utf8WithoutBom
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$script:BootstrapperVersion = "0.2.0"
-$script:BootstrapperRepository = "rukaruka966/ibuki-bootstrapper"
-$script:RawBaseUrl = "https://raw.githubusercontent.com/$($script:BootstrapperRepository)/main"
-$script:CreatedFiles = [System.Collections.Generic.List[string]]::new()
-$script:CreatedRepository = ""
-$script:CurrentPhase = "Start"
+$state = [PSCustomObject]@{
+    BootstrapperVersion = "0.2.0"
+    BootstrapperRepository = "rukaruka966/ibuki-bootstrapper"
+    RawBaseUrl = "https://raw.githubusercontent.com/rukaruka966/ibuki-bootstrapper/main"
+    CreatedFiles = [System.Collections.Generic.List[string]]::new()
+    CreatedRepository = ""
+    CurrentPhase = "Start"
+    CancelRequested = $false
+}
 
 function Write-Phase {
     param(
@@ -31,7 +59,7 @@ function Write-Phase {
         [string]$Name
     )
 
-    $script:CurrentPhase = $Name
+    $state.CurrentPhase = $Name
     Write-Host ""
     Write-Host "[$Name]" -ForegroundColor Cyan
 }
@@ -119,11 +147,11 @@ function Assert-ProjectId {
 }
 
 function Get-SourceCommitId {
-    if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
-        $gitDirectory = Join-Path $PSScriptRoot ".git"
+    if (-not [string]::IsNullOrWhiteSpace($BootstrapRoot)) {
+        $gitDirectory = Join-Path $BootstrapRoot ".git"
 
         if ((Test-Path -LiteralPath $gitDirectory) -and (Get-Command git -ErrorAction SilentlyContinue)) {
-            $commit = & git -C $PSScriptRoot rev-parse --short=12 HEAD 2>$null
+            $commit = & git -C $BootstrapRoot rev-parse --short=12 HEAD 2>$null
 
             if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace(($commit -join ""))) {
                 return ($commit -join "").Trim()
@@ -132,7 +160,7 @@ function Get-SourceCommitId {
     }
 
     try {
-        $commitInfo = Invoke-RestMethod -Uri "https://api.github.com/repos/$($script:BootstrapperRepository)/commits/main"
+        $commitInfo = Invoke-RestMethod -Uri "https://api.github.com/repos/$($state.BootstrapperRepository)/commits/main"
         return ([string]$commitInfo.sha).Substring(0, 12)
     } catch {
         return "unavailable"
@@ -173,7 +201,13 @@ function Confirm-Action {
     }
 
     $answer = Read-Host "$Prompt [Y/n]"
-    return [string]::IsNullOrWhiteSpace($answer) -or $answer.Trim().ToLowerInvariant() -eq "y"
+
+    if ($null -eq $answer) {
+        $state.CancelRequested = $true
+        return $false
+    }
+
+    return $answer -eq "" -or $answer.Trim().ToLowerInvariant() -eq "y"
 }
 
 function Select-Blueprint {
@@ -189,8 +223,13 @@ function Select-Blueprint {
 
         $selection = Read-Host "Configuration [default: 1]"
 
+        if ($null -eq $selection) {
+            $state.CancelRequested = $true
+            return $null
+        }
+
         switch ($selection) {
-            { [string]::IsNullOrWhiteSpace($_) -or $_ -eq "1" } {
+            { $_ -eq "" -or $_ -eq "1" } {
                 return "web-hono"
             }
             "2" {
@@ -224,7 +263,12 @@ function Read-GitHubChoice {
     while ($true) {
         $answer = Read-Host "Create a private GitHub repository? [Y/n]"
 
-        if ([string]::IsNullOrWhiteSpace($answer) -or $answer.Trim().ToLowerInvariant() -eq "y") {
+        if ($null -eq $answer) {
+            $state.CancelRequested = $true
+            return $false
+        }
+
+        if ($answer -eq "" -or $answer.Trim().ToLowerInvariant() -eq "y") {
             return $true
         }
 
@@ -261,6 +305,11 @@ function Resolve-BootstrapConfiguration {
         }
 
         $resolvedProjectId = Read-Host "Project ID (lowercase kebab-case)"
+
+        if ($null -eq $resolvedProjectId) {
+            $state.CancelRequested = $true
+            return $null
+        }
     }
 
     if ([string]::IsNullOrWhiteSpace($resolvedDisplayName)) {
@@ -269,7 +318,12 @@ function Resolve-BootstrapConfiguration {
         } else {
             $resolvedDisplayName = Read-Host "Display name [$resolvedProjectId]"
 
-            if ([string]::IsNullOrWhiteSpace($resolvedDisplayName)) {
+            if ($null -eq $resolvedDisplayName) {
+                $state.CancelRequested = $true
+                return $null
+            }
+
+            if ($resolvedDisplayName -eq "") {
                 $resolvedDisplayName = $resolvedProjectId
             }
         }
@@ -284,6 +338,11 @@ function Resolve-BootstrapConfiguration {
 
         $locationChoice = Read-Host "Destination: [1] new '$resolvedProjectId' folder, [2] current empty folder [default: 1]"
 
+        if ($null -eq $locationChoice) {
+            $state.CancelRequested = $true
+            return $null
+        }
+
         if ($locationChoice -eq "2") {
             $resolvedDestination = (Get-Location).Path
         } else {
@@ -291,12 +350,16 @@ function Resolve-BootstrapConfiguration {
         }
     }
 
-    $createGitHub = if ($NonInteractive) {
-        -not [bool]$SkipGitHub
+    if ($NonInteractive) {
+        $createGitHub = -not [bool]$SkipGitHub
     } elseif ($SkipGitHub) {
-        $false
+        $createGitHub = $false
     } else {
-        Read-GitHubChoice
+        $createGitHub = Read-GitHubChoice
+
+        if ($state.CancelRequested) {
+            return $null
+        }
     }
 
     if ([string]::IsNullOrWhiteSpace($resolvedRepositoryName)) {
@@ -392,7 +455,7 @@ function Get-TemplateContent {
         return Get-Content -LiteralPath $localPath -Raw
     }
 
-    $uri = "$($script:RawBaseUrl)/blueprints/$BlueprintId/$Source"
+    $uri = "$($state.RawBaseUrl)/blueprints/$BlueprintId/$Source"
     return (Invoke-WebRequest -Uri $uri -UseBasicParsing).Content
 }
 
@@ -573,7 +636,7 @@ function Write-GeneratedFile {
         }
     }
 
-    $script:CreatedFiles.Add($targetPath)
+    $state.CreatedFiles.Add($targetPath)
 }
 
 function Assert-NoReparsePoint {
@@ -864,7 +927,7 @@ function Invoke-GitHubProvisioning {
     }
 
     Invoke-CheckedCommand -FilePath gh -Arguments $createArguments -WorkingDirectory $ProjectRoot
-    $script:CreatedRepository = "https://github.com/$repository"
+    $state.CreatedRepository = "https://github.com/$repository"
     Invoke-CheckedCommand -FilePath git -Arguments @("push", "-u", "origin", "main") -WorkingDirectory $ProjectRoot
     Wait-ForQualityWorkflow -Repository $repository -Branch "main" -WorkingDirectory $ProjectRoot
 
@@ -950,10 +1013,10 @@ function Invoke-IbukiBootstrap {
     Write-Host "------------------------------------------------------------"
     Write-Host "Ibuki Bootstrapper"
     Write-Host ""
-    Write-Host "Release/Tag : v$($script:BootstrapperVersion)"
+    Write-Host "Release/Tag : v$($state.BootstrapperVersion)"
     Write-Host "Commit ID   : $sourceCommitId"
     Write-Host "Channel     : main"
-    Write-Host "Source      : $($script:BootstrapperRepository)"
+    Write-Host "Source      : $($state.BootstrapperRepository)"
     Write-Host "------------------------------------------------------------"
 
     if ($UseCurrentDirectory -and -not [string]::IsNullOrWhiteSpace($Destination)) {
@@ -1061,8 +1124,8 @@ function Invoke-IbukiBootstrap {
     $localBlueprintRoot = ""
     $useLocalBlueprint = $false
 
-    if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
-        $candidate = Join-Path $PSScriptRoot "blueprints/$Blueprint"
+    if (-not [string]::IsNullOrWhiteSpace($BootstrapRoot)) {
+        $candidate = Join-Path $BootstrapRoot "blueprints/$Blueprint"
 
         if (Test-Path -LiteralPath $candidate) {
             $localBlueprintRoot = $candidate
@@ -1071,7 +1134,7 @@ function Invoke-IbukiBootstrap {
     }
 
     if ([string]::IsNullOrWhiteSpace($localBlueprintRoot)) {
-        $manifest = Invoke-RestMethod -Uri "$($script:RawBaseUrl)/blueprints/$Blueprint/manifest.json"
+        $manifest = Invoke-RestMethod -Uri "$($state.RawBaseUrl)/blueprints/$Blueprint/manifest.json"
     } else {
         $manifestPath = Join-Path $localBlueprintRoot "manifest.json"
         $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
@@ -1095,7 +1158,7 @@ function Invoke-IbukiBootstrap {
     $displayNameJson = $DisplayName | ConvertTo-Json -Compress
     $displayNameHtml = [System.Net.WebUtility]::HtmlEncode($DisplayName)
     $tokens = @{
-        "__BOOTSTRAPPER_VERSION__" = $script:BootstrapperVersion
+        "__BOOTSTRAPPER_VERSION__" = $state.BootstrapperVersion
         "__PROJECT_ID__" = $ProjectId
         "__PROJECT_DISPLAY_NAME__" = $DisplayName
         "__PROJECT_DISPLAY_NAME_YAML__" = $displayNameYaml
@@ -1120,7 +1183,7 @@ function Invoke-IbukiBootstrap {
             -Content $content
     }
 
-    Write-Host "Generated $($script:CreatedFiles.Count) file(s)."
+    Write-Host "Generated $($state.CreatedFiles.Count) file(s)."
 
     Write-Phase -Name "Verify"
     Invoke-CheckedCommand -FilePath pnpm -Arguments @("install") -WorkingDirectory $Destination
@@ -1170,24 +1233,63 @@ try {
 } catch {
     Write-Host ""
     Write-Host "Ibuki Bootstrapper failed." -ForegroundColor Red
-    Write-Host "Phase   : $($script:CurrentPhase)"
-    Write-Host "Version : $($script:BootstrapperVersion)"
+    Write-Host "Phase   : $($state.CurrentPhase)"
+    Write-Host "Version : $($state.BootstrapperVersion)"
     Write-Host "Error   : $($_.Exception.Message)"
 
-    if ($script:CreatedFiles.Count -gt 0) {
+    if ($state.CreatedFiles.Count -gt 0) {
         Write-Host ""
         Write-Host "Created files were preserved:"
 
-        foreach ($createdFile in $script:CreatedFiles) {
+        foreach ($createdFile in $state.CreatedFiles) {
             Write-Host "  $createdFile"
         }
     }
 
-    if (-not [string]::IsNullOrWhiteSpace($script:CreatedRepository)) {
+    if (-not [string]::IsNullOrWhiteSpace($state.CreatedRepository)) {
         Write-Host ""
         Write-Host "Created GitHub repository was preserved:"
-        Write-Host "  $($script:CreatedRepository)"
+        Write-Host "  $($state.CreatedRepository)"
     }
 
     throw
 }
+} finally {
+    [Console]::OutputEncoding = $previousConsoleOutputEncoding
+
+    if ($IsInvokeExpression) {
+        if ($lastExitCodeExisted) {
+            Set-Variable -Name LASTEXITCODE -Scope Global -Value $previousLastExitCode
+        } else {
+            Remove-Variable -Name LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue
+        }
+    }
+}
+}
+
+$isPhysicalBootstrapFile = $false
+
+if (
+    -not [string]::IsNullOrWhiteSpace($InvocationPath) -and
+    (Test-Path -LiteralPath $InvocationPath -PathType Leaf)
+) {
+    $entrypointMarker = [System.IO.File]::ReadLines($InvocationPath) |
+        Select-Object -First 1
+    $isPhysicalBootstrapFile = $entrypointMarker -eq "# IBUKI_BOOTSTRAPPER_ENTRYPOINT_V1"
+}
+
+$isInvokeExpression = -not $isPhysicalBootstrapFile
+$effectiveBootstrapRoot = if ($isPhysicalBootstrapFile) {
+    $BootstrapRoot
+} else {
+    ""
+}
+$BootstrapRoot = $effectiveBootstrapRoot
+
+if ($isInvokeExpression) {
+    & $core -IsInvokeExpression $true
+} else {
+    $fileArguments = @($RawArguments[0])
+    & $core -IsInvokeExpression $false @fileArguments
+}
+} $PSScriptRoot $PSCommandPath (, $args)
