@@ -47,11 +47,15 @@ $state = [PSCustomObject]@{
     BootstrapperVersion = "0.2.0"
     BootstrapperRepository = "rukaruka966/ibuki-bootstrapper"
     RawBaseUrl = "https://raw.githubusercontent.com/rukaruka966/ibuki-bootstrapper/main"
+    BlueprintRevision = "main"
     CreatedFiles = [System.Collections.Generic.List[string]]::new()
     CreatedRepository = ""
     CurrentPhase = "Start"
     CancelRequested = $false
     MaximumDestinationLength = 96
+    MaximumBlueprintFiles = 256
+    MaximumBlueprintSourceBytes = 10MB
+    MaximumBlueprintTotalBytes = 50MB
 }
 
 function Write-Phase {
@@ -159,6 +163,34 @@ function ConvertTo-BootstrapperVersion {
     return "unavailable"
 }
 
+function Test-LocalBlueprintAvailable {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Root,
+
+        [string]$BlueprintId = ""
+    )
+
+    $blueprintsRoot = Join-Path $Root "blueprints"
+
+    if (-not (Test-Path -LiteralPath $blueprintsRoot -PathType Container)) {
+        return $false
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($BlueprintId)) {
+        $manifestPath = Join-Path $blueprintsRoot "$BlueprintId/manifest.json"
+        return (Test-Path -LiteralPath $manifestPath -PathType Leaf)
+    }
+
+    foreach ($directory in @(Get-ChildItem -LiteralPath $blueprintsRoot -Directory)) {
+        if (Test-Path -LiteralPath (Join-Path $directory.FullName "manifest.json") -PathType Leaf) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
 function Get-LocalReleaseMetadata {
     if ([string]::IsNullOrWhiteSpace($BootstrapRoot)) {
         return $null
@@ -167,6 +199,7 @@ function Get-LocalReleaseMetadata {
     $gitDirectory = Join-Path $BootstrapRoot ".git"
 
     if (
+        -not (Test-LocalBlueprintAvailable -Root $BootstrapRoot) -or
         -not (Test-Path -LiteralPath $gitDirectory) -or
         -not (Get-Command git -ErrorAction SilentlyContinue)
     ) {
@@ -225,6 +258,7 @@ function Get-LocalReleaseMetadata {
         FullCommitId = $fullCommitId
         Channel = $branch
         Version = ConvertTo-BootstrapperVersion -Tag $releaseTag
+        IsLocal = $true
     }
 }
 
@@ -249,6 +283,7 @@ function Get-RemoteReleaseMetadata {
             FullCommitId = ""
             Channel = "main"
             Version = "unavailable"
+            IsLocal = $false
         }
     }
 
@@ -280,6 +315,7 @@ function Get-RemoteReleaseMetadata {
         FullCommitId = $fullCommitId
         Channel = "main"
         Version = ConvertTo-BootstrapperVersion -Tag $releaseTag
+        IsLocal = $false
     }
 }
 
@@ -291,6 +327,22 @@ function Get-BootstrapReleaseMetadata {
     }
 
     return Get-RemoteReleaseMetadata
+}
+
+function Write-BootstrapReleaseMetadata {
+    param(
+        [Parameter(Mandatory)]
+        [object]$Metadata
+    )
+
+    Write-Host "------------------------------------------------------------"
+    Write-Host "Ibuki Bootstrapper"
+    Write-Host ""
+    Write-Host "Release/Tag : $($Metadata.ReleaseTag)"
+    Write-Host "Commit ID   : $($Metadata.CommitId)"
+    Write-Host "Channel     : $($Metadata.Channel)"
+    Write-Host "Source      : $($state.BootstrapperRepository)"
+    Write-Host "------------------------------------------------------------"
 }
 
 function Test-EmptyDirectory {
@@ -342,7 +394,7 @@ function Select-Blueprint {
         Write-Host "Select a project configuration:"
         Write-Host "  [1] Web: React + Hono (available)"
         Write-Host "  [2] Web: React + Hono + Spring Boot (Coming soon)"
-        Write-Host "  [3] Web API: Spring Boot (Coming soon)"
+        Write-Host "  [3] Web API: Spring Boot (available)"
         Write-Host "  [4] Android: Jetpack Compose (Coming soon)"
         Write-Host "  [5] Windows Desktop: Compose Multiplatform (Coming soon)"
         Write-Host "  [0] Cancel"
@@ -363,8 +415,7 @@ function Select-Blueprint {
                 continue
             }
             "3" {
-                Write-Warning "Web API: Spring Boot is Coming soon. Select an available configuration."
-                continue
+                return "api-spring"
             }
             "4" {
                 Write-Warning "Android: Jetpack Compose is Coming soon. Select an available configuration."
@@ -510,8 +561,8 @@ function Assert-BootstrapConfiguration {
         [PSCustomObject]$Configuration
     )
 
-    if ($Configuration.BlueprintId -ne "web-hono") {
-        throw "Blueprint '$($Configuration.BlueprintId)' is not available. Available blueprint: web-hono."
+    if (@("web-hono", "api-spring") -notcontains $Configuration.BlueprintId) {
+        throw "Blueprint '$($Configuration.BlueprintId)' is not available. Available blueprints: web-hono, api-spring."
     }
 
     Assert-ProjectId -Value $Configuration.ProjectId -Label "Project ID"
@@ -539,11 +590,15 @@ function Assert-BootstrapConfiguration {
 function Show-BootstrapConfiguration {
     param(
         [Parameter(Mandatory)]
-        [PSCustomObject]$Configuration
+        [PSCustomObject]$Configuration,
+
+        [Parameter(Mandatory)]
+        [object]$Manifest
     )
 
     Write-Phase -Name "Confirmation"
     Write-Host "Blueprint ID      : $($Configuration.BlueprintId)"
+    Write-Host "Configuration     : $($Manifest.displayName)"
     Write-Host "Project ID        : $($Configuration.ProjectId)"
     Write-Host "Display name      : $($Configuration.DisplayName)"
     Write-Host "Destination       : $($Configuration.Destination)"
@@ -556,17 +611,20 @@ function Show-BootstrapConfiguration {
         Write-Host "Branches          : none (local generation only)"
     }
 
+    Write-Host "Required toolchains:"
+
+    foreach ($toolchain in @($Manifest.toolchains)) {
+        Write-Host "  $($toolchain.id) >= $($toolchain.minimumVersion)"
+    }
+
     Write-Host "Local verification:"
-    Write-Host "  pnpm install"
-    Write-Host "  pnpm run lint"
-    Write-Host "  pnpm run test"
-    Write-Host "  pnpm run typecheck"
-    Write-Host "  pnpm run build"
-    Write-Host "  pnpm run smoke"
-    Write-Host "  pnpm run doctor"
+
+    foreach ($step in @($Manifest.verification)) {
+        Write-Host "  $($step.command) $(@($step.arguments) -join ' ')"
+    }
 }
 
-function Get-TemplateContent {
+function Get-BlueprintSourceBytes {
     param(
         [Parameter(Mandatory)]
         [string]$Source,
@@ -580,19 +638,298 @@ function Get-TemplateContent {
     )
 
     if ($UseLocalBlueprint) {
+        Assert-SafeBlueprintRelativePath -Value $Source -Label "source"
         $localPath = Join-Path $LocalBlueprintRoot (
             $Source -replace '/', [System.IO.Path]::DirectorySeparatorChar
         )
+        $canonicalBlueprintRoot = [System.IO.Path]::GetFullPath($LocalBlueprintRoot)
+        $canonicalSource = [System.IO.Path]::GetFullPath($localPath)
+        $sourcePrefix = $canonicalBlueprintRoot.TrimEnd(
+            [System.IO.Path]::DirectorySeparatorChar,
+            [System.IO.Path]::AltDirectorySeparatorChar
+        ) + [System.IO.Path]::DirectorySeparatorChar
 
-        if (-not (Test-Path -LiteralPath $localPath -PathType Leaf)) {
+        if (-not $canonicalSource.StartsWith(
+            $sourcePrefix,
+            [System.StringComparison]::OrdinalIgnoreCase
+        )) {
+            throw "Local blueprint source escapes its root: $Source"
+        }
+
+        if (-not (Test-Path -LiteralPath $canonicalSource -PathType Leaf)) {
             throw "Local blueprint '$BlueprintId' is missing its manifest source: $Source"
         }
 
-        return Get-Content -LiteralPath $localPath -Raw
+        Assert-NoReparsePoint `
+            -DestinationRoot $canonicalBlueprintRoot `
+            -TargetParent (Split-Path -Parent $canonicalSource)
+
+        if (
+            (Get-Item -LiteralPath $canonicalSource).Attributes.HasFlag(
+                [System.IO.FileAttributes]::ReparsePoint
+            )
+        ) {
+            throw "Local blueprint source must not be a reparse point: $Source"
+        }
+
+        return ,([System.IO.File]::ReadAllBytes($canonicalSource))
     }
 
     $uri = "$($state.RawBaseUrl)/blueprints/$BlueprintId/$Source"
-    return (Invoke-WebRequest -Uri $uri -UseBasicParsing).Content
+    $client = [System.Net.Http.HttpClient]::new()
+
+    try {
+        return ,($client.GetByteArrayAsync($uri).GetAwaiter().GetResult())
+    } finally {
+        $client.Dispose()
+    }
+}
+
+function ConvertFrom-BlueprintTextBytes {
+    param(
+        [Parameter(Mandatory)]
+        [byte[]]$Bytes,
+
+        [Parameter(Mandatory)]
+        [string]$Source
+    )
+
+    if (
+        $Bytes.Length -ge 3 -and
+        $Bytes[0] -eq 0xEF -and
+        $Bytes[1] -eq 0xBB -and
+        $Bytes[2] -eq 0xBF
+    ) {
+        throw "Blueprint text source must not contain a UTF-8 BOM: $Source"
+    }
+
+    $strictUtf8 = [System.Text.UTF8Encoding]::new($false, $true)
+
+    try {
+        $content = $strictUtf8.GetString($Bytes)
+    } catch [System.Text.DecoderFallbackException] {
+        throw "Blueprint text source is not valid UTF-8: $Source"
+    }
+
+    if ($content.Contains("`r")) {
+        throw "Blueprint text source must use LF line endings: $Source"
+    }
+
+    return $content
+}
+
+function Read-BlueprintManifest {
+    param(
+        [Parameter(Mandatory)]
+        [string]$BlueprintId,
+
+        [string]$LocalBlueprintRoot = "",
+
+        [switch]$UseLocalBlueprint
+    )
+
+    $bytes = Get-BlueprintSourceBytes `
+        -Source "manifest.json" `
+        -LocalBlueprintRoot $LocalBlueprintRoot `
+        -BlueprintId $BlueprintId `
+        -UseLocalBlueprint:$UseLocalBlueprint
+
+    if ($bytes.Length -gt $state.MaximumBlueprintSourceBytes) {
+        throw "Blueprint manifest exceeds the size limit."
+    }
+
+    $json = ConvertFrom-BlueprintTextBytes `
+        -Bytes $bytes `
+        -Source "manifest.json"
+
+    try {
+        return $json | ConvertFrom-Json
+    } catch {
+        throw "Blueprint manifest '$BlueprintId' is not valid JSON."
+    }
+}
+
+function Get-Sha256Hex {
+    param(
+        [Parameter(Mandatory)]
+        [byte[]]$Bytes
+    )
+
+    return [Convert]::ToHexString(
+        [System.Security.Cryptography.SHA256]::HashData($Bytes)
+    ).ToLowerInvariant()
+}
+
+function Get-BlueprintVersionOutput {
+    param(
+        [Parameter(Mandatory)]
+        [object]$Toolchain,
+
+        [Parameter(Mandatory)]
+        [string]$WorkingDirectory
+    )
+
+    Push-Location -LiteralPath $WorkingDirectory
+
+    try {
+        if ($Toolchain.id -eq "java") {
+            $previousNativeErrorPreference = $PSNativeCommandUseErrorActionPreference
+            $PSNativeCommandUseErrorActionPreference = $false
+
+            try {
+                $output = & $Toolchain.command @($Toolchain.versionArguments) 2>&1
+                $exitCode = $LASTEXITCODE
+            } finally {
+                $PSNativeCommandUseErrorActionPreference = $previousNativeErrorPreference
+            }
+        } else {
+            $output = & $Toolchain.command @($Toolchain.versionArguments)
+            $exitCode = $LASTEXITCODE
+        }
+
+        if ($exitCode -ne 0) {
+            throw "Unable to determine $($Toolchain.id) version."
+        }
+
+        return ($output -join "`n").Trim()
+    } finally {
+        Pop-Location
+    }
+}
+
+function Assert-BlueprintToolchains {
+    param(
+        [Parameter(Mandatory)]
+        [object]$Manifest,
+
+        [Parameter(Mandatory)]
+        [string]$WorkingDirectory
+    )
+
+    Write-Host ""
+    Write-Host "Blueprint toolchains:"
+
+    foreach ($toolchain in @($Manifest.toolchains)) {
+        Assert-Command -Name $toolchain.command
+        $output = Get-BlueprintVersionOutput `
+            -Toolchain $toolchain `
+            -WorkingDirectory $WorkingDirectory
+        $match = [regex]::Match($output, [string]$toolchain.versionPattern)
+
+        if (-not $match.Success -or $match.Groups.Count -lt 2) {
+            throw (
+                "Unable to parse $($toolchain.id) version. " +
+                "Expected pattern '$($toolchain.versionPattern)'. Detected: $output"
+            )
+        }
+
+        $detectedVersion = [version]$match.Groups[1].Value
+        $minimumVersion = [version]$toolchain.minimumVersion
+
+        if ($detectedVersion -lt $minimumVersion) {
+            throw (
+                "$($toolchain.id) $minimumVersion or later is required. " +
+                "Found: $detectedVersion"
+            )
+        }
+
+        if (
+            @($toolchain.PSObject.Properties.Name) -contains "requiredMajor" -and
+            $detectedVersion.Major -ne [int]$toolchain.requiredMajor
+        ) {
+            throw (
+                "$($toolchain.id) major version $($toolchain.requiredMajor) is required. " +
+                "Found: $detectedVersion"
+            )
+        }
+
+        Write-Host "  $($toolchain.id) : $detectedVersion"
+    }
+
+    $toolchainIds = @($Manifest.toolchains | ForEach-Object { $_.id })
+
+    if ($toolchainIds -contains "java" -and $toolchainIds -contains "javac") {
+        $javaPath = [System.IO.Path]::GetFullPath(
+            (
+                Get-Command java -CommandType Application |
+                    Select-Object -First 1
+            ).Source
+        )
+        $javacPath = [System.IO.Path]::GetFullPath(
+            (
+                Get-Command javac -CommandType Application |
+                    Select-Object -First 1
+            ).Source
+        )
+        $javaHome = Split-Path -Parent (Split-Path -Parent $javaPath)
+        $javacHome = Split-Path -Parent (Split-Path -Parent $javacPath)
+
+        if (-not $javaHome.Equals(
+            $javacHome,
+            [System.StringComparison]::OrdinalIgnoreCase
+        )) {
+            throw "java and javac must resolve from the same JDK 17 installation."
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($env:JAVA_HOME)) {
+            $configuredJavaHome = [System.IO.Path]::GetFullPath($env:JAVA_HOME).TrimEnd(
+                [System.IO.Path]::DirectorySeparatorChar,
+                [System.IO.Path]::AltDirectorySeparatorChar
+            )
+            $resolvedJavaHome = $javaHome.TrimEnd(
+                [System.IO.Path]::DirectorySeparatorChar,
+                [System.IO.Path]::AltDirectorySeparatorChar
+            )
+
+            if (-not $configuredJavaHome.Equals(
+                $resolvedJavaHome,
+                [System.StringComparison]::OrdinalIgnoreCase
+            )) {
+                throw "JAVA_HOME must reference the same JDK 17 used by java and javac."
+            }
+        }
+    }
+}
+
+function Assert-SafeBlueprintRelativePath {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Value,
+
+        [Parameter(Mandatory)]
+        [string]$Label,
+
+        [switch]$AllowCurrentDirectory
+    )
+
+    if ($AllowCurrentDirectory -and $Value -eq ".") {
+        return
+    }
+
+    if (
+        [string]::IsNullOrWhiteSpace($Value) -or
+        [System.IO.Path]::IsPathRooted($Value) -or
+        $Value -match '[\x00-\x1f\\:*?"<>|%#]' -or
+        $Value.StartsWith("\\")
+    ) {
+        throw "Blueprint manifest contains an unsafe $Label path: '$Value'."
+    }
+
+    $segments = @($Value -split '/')
+
+    foreach ($segment in $segments) {
+        $baseName = $segment.Split(".")[0]
+
+        if (
+            [string]::IsNullOrWhiteSpace($segment) -or
+            @(".", "..") -contains $segment -or
+            $segment.EndsWith(".") -or
+            $segment.EndsWith(" ") -or
+            $baseName -match '^(?i:con|prn|aux|nul|com[1-9]|lpt[1-9])$'
+        ) {
+            throw "Blueprint manifest contains an unsafe $Label path: '$Value'."
+        }
+    }
 }
 
 function Assert-BlueprintManifest {
@@ -608,12 +945,183 @@ function Assert-BlueprintManifest {
         [switch]$UseLocalBlueprint
     )
 
+    $manifestProperties = @($Manifest.PSObject.Properties.Name)
+    $allowedManifestProperties = @(
+        "schemaVersion",
+        "id",
+        "version",
+        "displayName",
+        "toolchains",
+        "verification",
+        "files"
+    )
+    $unknownManifestProperties = @(
+        $manifestProperties | Where-Object {
+            $allowedManifestProperties -notcontains $_
+        }
+    )
+
+    if ($unknownManifestProperties.Count -gt 0) {
+        throw "Blueprint manifest '$BlueprintId' contains unknown top-level properties."
+    }
+
+    foreach ($requiredProperty in $allowedManifestProperties) {
+        if ($manifestProperties -notcontains $requiredProperty) {
+            throw "Blueprint manifest '$BlueprintId' is missing '$requiredProperty'."
+        }
+    }
+
+    if (
+        (
+            $Manifest.schemaVersion -isnot [int] -and
+            $Manifest.schemaVersion -isnot [long]
+        ) -or
+        $Manifest.schemaVersion -ne 2
+    ) {
+        throw "Blueprint manifest '$BlueprintId' must use schemaVersion 2."
+    }
+
+    if (
+        $Manifest.id -isnot [string] -or
+        $Manifest.version -isnot [string] -or
+        $Manifest.displayName -isnot [string] -or
+        $Manifest.toolchains -isnot [System.Array] -or
+        $Manifest.verification -isnot [System.Array] -or
+        $Manifest.files -isnot [System.Array]
+    ) {
+        throw "Blueprint manifest '$BlueprintId' has invalid top-level property types."
+    }
+
     if ($Manifest.id -ne $BlueprintId) {
         throw "Blueprint manifest ID '$($Manifest.id)' does not match '$BlueprintId'."
     }
 
+    if ([string]::IsNullOrWhiteSpace([string]$Manifest.displayName)) {
+        throw "Blueprint manifest '$BlueprintId' does not have a displayName."
+    }
+
+    if ([string]::IsNullOrWhiteSpace([string]$Manifest.version)) {
+        throw "Blueprint manifest '$BlueprintId' does not have a version."
+    }
+
+    if (@($Manifest.toolchains).Count -eq 0) {
+        throw "Blueprint manifest '$BlueprintId' does not declare any toolchains."
+    }
+
+    $toolchainIds = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::OrdinalIgnoreCase
+    )
+
+    foreach ($toolchain in @($Manifest.toolchains)) {
+        $toolchainProperties = @($toolchain.PSObject.Properties.Name)
+        $allowedToolchainProperties = @(
+            "id",
+            "command",
+            "versionArguments",
+            "minimumVersion",
+            "versionPattern",
+            "requiredMajor"
+        )
+
+        if (@(
+            $toolchainProperties | Where-Object {
+                $allowedToolchainProperties -notcontains $_
+            }
+        ).Count -gt 0) {
+            throw "Blueprint manifest '$BlueprintId' has unknown toolchain properties."
+        }
+
+        foreach ($requiredProperty in @(
+            "id",
+            "command",
+            "versionArguments",
+            "minimumVersion",
+            "versionPattern"
+        )) {
+            if ($toolchainProperties -notcontains $requiredProperty) {
+                throw "Blueprint manifest '$BlueprintId' has an incomplete toolchain declaration."
+            }
+        }
+
+        if (
+            [string]::IsNullOrWhiteSpace([string]$toolchain.id) -or
+            -not $toolchainIds.Add([string]$toolchain.id)
+        ) {
+            throw "Blueprint manifest '$BlueprintId' has a duplicate or empty toolchain ID."
+        }
+
+        if ([string]::IsNullOrWhiteSpace([string]$toolchain.command)) {
+            throw "Blueprint manifest '$BlueprintId' has an empty toolchain command."
+        }
+
+        if (
+            $toolchain.id -isnot [string] -or
+            $toolchain.command -isnot [string] -or
+            $toolchain.minimumVersion -isnot [string] -or
+            $toolchain.versionPattern -isnot [string] -or
+            $toolchain.versionArguments -isnot [System.Array]
+        ) {
+            throw "Blueprint manifest '$BlueprintId' has invalid toolchain property types."
+        }
+
+        try {
+            $null = [version]$toolchain.minimumVersion
+            $null = [regex]::new([string]$toolchain.versionPattern)
+        } catch {
+            throw "Blueprint manifest '$BlueprintId' has invalid toolchain version metadata."
+        }
+
+        if (
+            @($toolchain.PSObject.Properties.Name) -contains "requiredMajor" -and
+            $toolchain.requiredMajor -isnot [int] -and
+            $toolchain.requiredMajor -isnot [long]
+        ) {
+            throw "Blueprint manifest '$BlueprintId' has an invalid requiredMajor."
+        }
+
+        if (@($toolchain.versionArguments | Where-Object { $_ -isnot [string] }).Count -gt 0) {
+            throw "Blueprint manifest '$BlueprintId' has non-string toolchain arguments."
+        }
+    }
+
+    if (@($Manifest.verification).Count -eq 0) {
+        throw "Blueprint manifest '$BlueprintId' does not declare verification commands."
+    }
+
+    foreach ($step in @($Manifest.verification)) {
+        $stepProperties = @($step.PSObject.Properties.Name)
+        $allowedStepProperties = @("command", "arguments", "workingDirectory")
+
+        if (
+            @(
+                $stepProperties | Where-Object {
+                    $allowedStepProperties -notcontains $_
+                }
+            ).Count -gt 0 -or
+            $stepProperties -notcontains "command" -or
+            $stepProperties -notcontains "arguments" -or
+            $stepProperties -notcontains "workingDirectory" -or
+            $step.command -isnot [string] -or
+            $step.arguments -isnot [System.Array] -or
+            $step.workingDirectory -isnot [string] -or
+            [string]::IsNullOrWhiteSpace([string]$step.command) -or
+            @($step.arguments | Where-Object { $_ -isnot [string] }).Count -gt 0
+        ) {
+            throw "Blueprint manifest '$BlueprintId' has an invalid verification command."
+        }
+
+        Assert-SafeBlueprintRelativePath `
+            -Value ([string]$step.workingDirectory) `
+            -Label "verification working directory" `
+            -AllowCurrentDirectory
+    }
+
     if (@($Manifest.files).Count -eq 0) {
         throw "Blueprint manifest '$BlueprintId' does not contain any files."
+    }
+
+    if (@($Manifest.files).Count -gt $state.MaximumBlueprintFiles) {
+        throw "Blueprint manifest '$BlueprintId' contains too many files."
     }
 
     $targets = [System.Collections.Generic.HashSet[string]]::new(
@@ -629,8 +1137,17 @@ function Assert-BlueprintManifest {
 
     foreach ($file in @($Manifest.files)) {
         $propertyNames = @($file.PSObject.Properties.Name)
+        $allowedFileProperties = @("kind", "source", "target", "template", "sha256")
 
-        foreach ($requiredProperty in @("source", "target", "template")) {
+        if (@(
+            $propertyNames | Where-Object {
+                $allowedFileProperties -notcontains $_
+            }
+        ).Count -gt 0) {
+            throw "Blueprint manifest '$BlueprintId' has unknown file properties."
+        }
+
+        foreach ($requiredProperty in @("kind", "source", "target", "template")) {
             if ($propertyNames -notcontains $requiredProperty) {
                 throw "Blueprint manifest '$BlueprintId' contains an entry without '$requiredProperty'."
             }
@@ -640,21 +1157,12 @@ function Assert-BlueprintManifest {
             throw "Blueprint manifest '$BlueprintId' source and target values must be strings."
         }
 
-        if (
-            [string]::IsNullOrWhiteSpace($file.source) -or
-            [System.IO.Path]::IsPathRooted($file.source) -or
-            @($file.source -split '[\\/]').Contains("..")
-        ) {
-            throw "Blueprint manifest '$BlueprintId' contains an unsafe source path: '$($file.source)'."
+        if ($file.kind -isnot [string]) {
+            throw "Blueprint manifest '$BlueprintId' file kind must be a string."
         }
 
-        if (
-            [string]::IsNullOrWhiteSpace($file.target) -or
-            [System.IO.Path]::IsPathRooted($file.target) -or
-            @($file.target -split '[\\/]').Contains("..")
-        ) {
-            throw "Blueprint manifest '$BlueprintId' contains an unsafe target path: '$($file.target)'."
-        }
+        Assert-SafeBlueprintRelativePath -Value $file.source -Label "source"
+        Assert-SafeBlueprintRelativePath -Value $file.target -Label "target"
 
         $canonicalTarget = [System.IO.Path]::GetFullPath(
             (Join-Path $validationRoot $file.target)
@@ -667,6 +1175,30 @@ function Assert-BlueprintManifest {
             throw "Blueprint manifest '$BlueprintId' contains an unsafe target path: '$($file.target)'."
         }
 
+        foreach ($existingTarget in $targets) {
+            $existingPrefix = $existingTarget.TrimEnd(
+                [System.IO.Path]::DirectorySeparatorChar,
+                [System.IO.Path]::AltDirectorySeparatorChar
+            ) + [System.IO.Path]::DirectorySeparatorChar
+            $candidatePrefix = $canonicalTarget.TrimEnd(
+                [System.IO.Path]::DirectorySeparatorChar,
+                [System.IO.Path]::AltDirectorySeparatorChar
+            ) + [System.IO.Path]::DirectorySeparatorChar
+
+            if (
+                $canonicalTarget.StartsWith(
+                    $existingPrefix,
+                    [System.StringComparison]::OrdinalIgnoreCase
+                ) -or
+                $existingTarget.StartsWith(
+                    $candidatePrefix,
+                    [System.StringComparison]::OrdinalIgnoreCase
+                )
+            ) {
+                throw "Blueprint manifest '$BlueprintId' has a file/directory target collision."
+            }
+        }
+
         if (-not $targets.Add($canonicalTarget)) {
             throw "Blueprint manifest '$BlueprintId' contains a duplicate target: '$($file.target)'."
         }
@@ -675,16 +1207,119 @@ function Assert-BlueprintManifest {
             throw "Blueprint manifest '$BlueprintId' has a non-boolean template flag for '$($file.target)'."
         }
 
+        if (@("text", "binary") -notcontains $file.kind) {
+            throw "Blueprint manifest '$BlueprintId' has an invalid file kind for '$($file.target)'."
+        }
+
+        if ($file.kind -eq "binary") {
+            if ($file.template) {
+                throw "Blueprint binary source cannot be a template: '$($file.source)'."
+            }
+
+            if (
+                @($file.PSObject.Properties.Name) -notcontains "sha256" -or
+                $file.sha256 -isnot [string] -or
+                [string]$file.sha256 -notmatch '^[0-9a-fA-F]{64}$'
+            ) {
+                throw "Blueprint binary source requires a SHA-256 checksum: '$($file.source)'."
+            }
+        }
+
         if ($UseLocalBlueprint) {
             $localSource = Join-Path $LocalBlueprintRoot (
                 $file.source -replace '/', [System.IO.Path]::DirectorySeparatorChar
             )
+            $canonicalBlueprintRoot = [System.IO.Path]::GetFullPath($LocalBlueprintRoot)
+            $canonicalSource = [System.IO.Path]::GetFullPath($localSource)
+            $sourcePrefix = $canonicalBlueprintRoot.TrimEnd(
+                [System.IO.Path]::DirectorySeparatorChar,
+                [System.IO.Path]::AltDirectorySeparatorChar
+            ) + [System.IO.Path]::DirectorySeparatorChar
+
+            if (-not $canonicalSource.StartsWith(
+                $sourcePrefix,
+                [System.StringComparison]::OrdinalIgnoreCase
+            )) {
+                throw "Local blueprint source escapes its root: $($file.source)"
+            }
 
             if (-not (Test-Path -LiteralPath $localSource -PathType Leaf)) {
                 throw "Local blueprint '$BlueprintId' is missing its manifest source: $($file.source)"
             }
+
+            Assert-NoReparsePoint `
+                -DestinationRoot $canonicalBlueprintRoot `
+                -TargetParent (Split-Path -Parent $canonicalSource)
+
+            if (
+                (Get-Item -LiteralPath $canonicalSource).Attributes.HasFlag(
+                    [System.IO.FileAttributes]::ReparsePoint
+                )
+            ) {
+                throw "Local blueprint source must not be a reparse point: $($file.source)"
+            }
         }
     }
+}
+
+function Read-BlueprintSources {
+    param(
+        [Parameter(Mandatory)]
+        [object]$Manifest,
+
+        [Parameter(Mandatory)]
+        [string]$BlueprintId,
+
+        [string]$LocalBlueprintRoot = "",
+
+        [switch]$UseLocalBlueprint
+    )
+
+    $sources = [System.Collections.Generic.Dictionary[string, byte[]]]::new(
+        [System.StringComparer]::Ordinal
+    )
+    $totalBytes = [long]0
+
+    foreach ($file in @($Manifest.files)) {
+        if (-not $sources.ContainsKey([string]$file.source)) {
+            $bytes = Get-BlueprintSourceBytes `
+                -Source $file.source `
+                -LocalBlueprintRoot $LocalBlueprintRoot `
+                -BlueprintId $BlueprintId `
+                -UseLocalBlueprint:$UseLocalBlueprint
+
+            if ($bytes.Length -gt $state.MaximumBlueprintSourceBytes) {
+                throw "Blueprint source exceeds the per-file size limit: $($file.source)"
+            }
+
+            $totalBytes += $bytes.Length
+
+            if ($totalBytes -gt $state.MaximumBlueprintTotalBytes) {
+                throw "Blueprint sources exceed the total size limit."
+            }
+
+            $sources.Add([string]$file.source, $bytes)
+        }
+
+        $sourceBytes = $sources[[string]$file.source]
+
+        if ($file.kind -eq "text") {
+            $null = ConvertFrom-BlueprintTextBytes `
+                -Bytes $sourceBytes `
+                -Source $file.source
+        } else {
+            $actualChecksum = Get-Sha256Hex -Bytes $sourceBytes
+
+            if ($actualChecksum -ne ([string]$file.sha256).ToLowerInvariant()) {
+                throw (
+                    "Blueprint binary checksum mismatch for '$($file.source)'. " +
+                    "Expected: $($file.sha256); actual: $actualChecksum"
+                )
+            }
+        }
+    }
+
+    return ,$sources
 }
 
 function Convert-TemplateContent {
@@ -768,6 +1403,64 @@ function Write-GeneratedFile {
         if ($null -ne $writer) {
             $writer.Dispose()
         } elseif ($null -ne $stream) {
+            $stream.Dispose()
+        }
+    }
+
+    $state.CreatedFiles.Add($targetPath)
+}
+
+function Write-GeneratedBinaryFile {
+    param(
+        [Parameter(Mandatory)]
+        [string]$DestinationRoot,
+
+        [Parameter(Mandatory)]
+        [string]$RelativePath,
+
+        [Parameter(Mandatory)]
+        [byte[]]$Bytes
+    )
+
+    $normalizedRoot = [System.IO.Path]::GetFullPath($DestinationRoot)
+    $targetPath = [System.IO.Path]::GetFullPath((Join-Path $normalizedRoot $RelativePath))
+    $rootPrefix = $normalizedRoot.TrimEnd(
+        [System.IO.Path]::DirectorySeparatorChar,
+        [System.IO.Path]::AltDirectorySeparatorChar
+    ) + [System.IO.Path]::DirectorySeparatorChar
+
+    if (-not $targetPath.StartsWith($rootPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Blueprint target escapes the destination: $RelativePath"
+    }
+
+    $parent = Split-Path -Parent $targetPath
+
+    Assert-NoReparsePoint `
+        -DestinationRoot $normalizedRoot `
+        -TargetParent $parent
+
+    if (-not (Test-Path -LiteralPath $parent)) {
+        New-Item -ItemType Directory -Path $parent -Force | Out-Null
+    }
+
+    Assert-NoReparsePoint `
+        -DestinationRoot $normalizedRoot `
+        -TargetParent $parent
+
+    $stream = $null
+
+    try {
+        $stream = [System.IO.File]::Open(
+            $targetPath,
+            [System.IO.FileMode]::CreateNew,
+            [System.IO.FileAccess]::Write,
+            [System.IO.FileShare]::None
+        )
+        $stream.Write($Bytes, 0, $Bytes.Length)
+    } catch [System.IO.IOException] {
+        throw "Refusing to overwrite or race with an existing path: $targetPath"
+    } finally {
+        if ($null -ne $stream) {
             $stream.Dispose()
         }
     }
@@ -1091,12 +1784,23 @@ function Invoke-GitHubProvisioning {
         "Initialize the local and remote repository."
     ) -WorkingDirectory $ProjectRoot
     Invoke-CheckedCommand -FilePath git -Arguments @("add", "--all") -WorkingDirectory $ProjectRoot
+
+    $gradleWrapper = Join-Path $ProjectRoot "systems/api-server/gradlew"
+
+    if (Test-Path -LiteralPath $gradleWrapper -PathType Leaf) {
+        Invoke-CheckedCommand -FilePath git -Arguments @(
+            "update-index",
+            "--chmod=+x",
+            "systems/api-server/gradlew"
+        ) -WorkingDirectory $ProjectRoot
+    }
+
     Invoke-CheckedCommand -FilePath git -Arguments @(
         "commit",
         "-m",
         "feat: generate initial project scaffold",
         "-m",
-        "Add the React frontend, Hono backend, CI, and project configuration."
+        "Add the selected systems, CI, and project configuration."
     ) -WorkingDirectory $ProjectRoot
 
     Write-Phase -Name "GitHub"
@@ -1242,16 +1946,24 @@ function Invoke-GitHubProvisioning {
 
 function Invoke-IbukiBootstrap {
     $releaseMetadata = Get-BootstrapReleaseMetadata
+    $releaseMetadataDisplayed = $false
     $state.BootstrapperVersion = $releaseMetadata.Version
 
-    Write-Host "------------------------------------------------------------"
-    Write-Host "Ibuki Bootstrapper"
-    Write-Host ""
-    Write-Host "Release/Tag : $($releaseMetadata.ReleaseTag)"
-    Write-Host "Commit ID   : $($releaseMetadata.CommitId)"
-    Write-Host "Channel     : $($releaseMetadata.Channel)"
-    Write-Host "Source      : $($state.BootstrapperRepository)"
-    Write-Host "------------------------------------------------------------"
+    if (
+        [string]::IsNullOrWhiteSpace($BootstrapRoot) -and
+        -not [string]::IsNullOrWhiteSpace($releaseMetadata.FullCommitId)
+    ) {
+        $state.BlueprintRevision = $releaseMetadata.FullCommitId
+        $state.RawBaseUrl = (
+            "https://raw.githubusercontent.com/" +
+            "$($state.BootstrapperRepository)/$($state.BlueprintRevision)"
+        )
+    }
+
+    if (-not $releaseMetadata.IsLocal) {
+        Write-BootstrapReleaseMetadata -Metadata $releaseMetadata
+        $releaseMetadataDisplayed = $true
+    }
 
     if ($UseCurrentDirectory -and -not [string]::IsNullOrWhiteSpace($Destination)) {
         throw "Use either -UseCurrentDirectory or -Destination, not both."
@@ -1263,30 +1975,9 @@ function Invoke-IbukiBootstrap {
         throw "PowerShell 7.6 or later is required. Found: $($PSVersionTable.PSVersion)"
     }
 
-    Assert-Command -Name git
-    Assert-Command -Name node
-    Assert-Command -Name pnpm
-
-    $nodeVersion = Get-CommandOutput -FilePath node -Arguments @("--version") -WorkingDirectory (Get-Location).Path
-    $pnpmVersion = Get-CommandOutput -FilePath pnpm -Arguments @("--version") -WorkingDirectory (Get-Location).Path
-    $gitVersion = Get-CommandOutput -FilePath git -Arguments @("--version") -WorkingDirectory (Get-Location).Path
-    $nodeSemanticVersion = [version]($nodeVersion.TrimStart("v"))
-    $pnpmMajor = [int](($pnpmVersion -split "\.")[0])
-
-    if ($nodeSemanticVersion -lt [version]"24.10.0") {
-        throw "Node.js 24.10.0 or later is required. Found: $nodeVersion"
-    }
-
-    if ($pnpmMajor -lt 11) {
-        throw "pnpm 11 or later is required. Found: $pnpmVersion"
-    }
-
     Write-Host ""
     Write-Host "Detected environment:"
     Write-Host "  PowerShell : $($PSVersionTable.PSVersion)"
-    Write-Host "  Node.js    : $nodeVersion"
-    Write-Host "  pnpm       : $pnpmVersion"
-    Write-Host "  Git        : $gitVersion"
 
     Write-Phase -Name "Project"
     $configuration = Resolve-BootstrapConfiguration
@@ -1298,7 +1989,63 @@ function Invoke-IbukiBootstrap {
 
     Assert-BootstrapConfiguration -Configuration $configuration
 
+    $localBlueprintRoot = ""
+    $useLocalBlueprint = $false
+
+    if (-not [string]::IsNullOrWhiteSpace($BootstrapRoot)) {
+        $candidate = Join-Path $BootstrapRoot "blueprints/$($configuration.BlueprintId)"
+
+        if (Test-LocalBlueprintAvailable -Root $BootstrapRoot -BlueprintId $configuration.BlueprintId) {
+            $localBlueprintRoot = $candidate
+            $useLocalBlueprint = $true
+        }
+    }
+
+    if (-not $useLocalBlueprint) {
+        if ($releaseMetadata.IsLocal) {
+            $releaseMetadata = Get-RemoteReleaseMetadata
+            $state.BootstrapperVersion = $releaseMetadata.Version
+        }
+
+        if ([string]::IsNullOrWhiteSpace($releaseMetadata.FullCommitId)) {
+            throw "Unable to resolve an immutable Bootstrapper commit for Blueprint retrieval."
+        }
+
+        $state.BlueprintRevision = $releaseMetadata.FullCommitId
+        $state.RawBaseUrl = (
+            "https://raw.githubusercontent.com/" +
+            "$($state.BootstrapperRepository)/$($state.BlueprintRevision)"
+        )
+    }
+
+    if (-not $releaseMetadataDisplayed) {
+        Write-BootstrapReleaseMetadata -Metadata $releaseMetadata
+        $releaseMetadataDisplayed = $true
+    }
+
+    $manifest = Read-BlueprintManifest `
+        -BlueprintId $configuration.BlueprintId `
+        -LocalBlueprintRoot $localBlueprintRoot `
+        -UseLocalBlueprint:$useLocalBlueprint
+
+    Assert-BlueprintManifest `
+        -Manifest $manifest `
+        -BlueprintId $configuration.BlueprintId `
+        -LocalBlueprintRoot $localBlueprintRoot `
+        -UseLocalBlueprint:$useLocalBlueprint
+
+    Assert-BlueprintToolchains `
+        -Manifest $manifest `
+        -WorkingDirectory (Get-Location).Path
+
+    $blueprintSources = Read-BlueprintSources `
+        -Manifest $manifest `
+        -BlueprintId $configuration.BlueprintId `
+        -LocalBlueprintRoot $localBlueprintRoot `
+        -UseLocalBlueprint:$useLocalBlueprint
+
     if ($configuration.CreateGitHub) {
+        Assert-Command -Name git
         Assert-Command -Name gh
         Invoke-CheckedCommand -FilePath gh -Arguments @(
             "auth",
@@ -1336,7 +2083,9 @@ function Invoke-IbukiBootstrap {
         }
     }
 
-    Show-BootstrapConfiguration -Configuration $configuration
+    Show-BootstrapConfiguration `
+        -Configuration $configuration `
+        -Manifest $manifest
 
     if (-not (Confirm-Action -Prompt "Generate this project?")) {
         Write-Host "Cancelled."
@@ -1354,31 +2103,6 @@ function Invoke-IbukiBootstrap {
     $RepositoryName = $configuration.RepositoryName
 
     Write-Phase -Name "Generate"
-
-    $localBlueprintRoot = ""
-    $useLocalBlueprint = $false
-
-    if (-not [string]::IsNullOrWhiteSpace($BootstrapRoot)) {
-        $candidate = Join-Path $BootstrapRoot "blueprints/$Blueprint"
-
-        if (Test-Path -LiteralPath $candidate) {
-            $localBlueprintRoot = $candidate
-            $useLocalBlueprint = $true
-        }
-    }
-
-    if ([string]::IsNullOrWhiteSpace($localBlueprintRoot)) {
-        $manifest = Invoke-RestMethod -Uri "$($state.RawBaseUrl)/blueprints/$Blueprint/manifest.json"
-    } else {
-        $manifestPath = Join-Path $localBlueprintRoot "manifest.json"
-        $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
-    }
-
-    Assert-BlueprintManifest `
-        -Manifest $manifest `
-        -BlueprintId $Blueprint `
-        -LocalBlueprintRoot $localBlueprintRoot `
-        -UseLocalBlueprint:$useLocalBlueprint
 
     if (-not (Test-EmptyDirectory -Path $Destination)) {
         throw "Destination changed before generation and is no longer empty: $Destination"
@@ -1401,32 +2125,58 @@ function Invoke-IbukiBootstrap {
     }
 
     foreach ($file in $manifest.files) {
-        $content = Get-TemplateContent `
-            -Source $file.source `
-            -LocalBlueprintRoot $localBlueprintRoot `
-            -BlueprintId $Blueprint `
-            -UseLocalBlueprint:$useLocalBlueprint
+        $sourceBytes = $blueprintSources[[string]$file.source]
 
-        if ($file.template) {
-            $content = Convert-TemplateContent -Content $content -Tokens $tokens
+        if ($file.kind -eq "binary") {
+            Write-GeneratedBinaryFile `
+                -DestinationRoot $Destination `
+                -RelativePath $file.target `
+                -Bytes $sourceBytes
+        } else {
+            $content = ConvertFrom-BlueprintTextBytes `
+                -Bytes $sourceBytes `
+                -Source $file.source
+
+            if ($file.template) {
+                $content = Convert-TemplateContent -Content $content -Tokens $tokens
+            }
+
+            Write-GeneratedFile `
+                -DestinationRoot $Destination `
+                -RelativePath $file.target `
+                -Content $content
         }
-
-        Write-GeneratedFile `
-            -DestinationRoot $Destination `
-            -RelativePath $file.target `
-            -Content $content
     }
 
     Write-Host "Generated $($state.CreatedFiles.Count) file(s)."
 
     Write-Phase -Name "Verify"
-    Invoke-CheckedCommand -FilePath pnpm -Arguments @("install") -WorkingDirectory $Destination
-    Invoke-CheckedCommand -FilePath pnpm -Arguments @("run", "lint") -WorkingDirectory $Destination
-    Invoke-CheckedCommand -FilePath pnpm -Arguments @("run", "test") -WorkingDirectory $Destination
-    Invoke-CheckedCommand -FilePath pnpm -Arguments @("run", "typecheck") -WorkingDirectory $Destination
-    Invoke-CheckedCommand -FilePath pnpm -Arguments @("run", "build") -WorkingDirectory $Destination
-    Invoke-CheckedCommand -FilePath pnpm -Arguments @("run", "smoke") -WorkingDirectory $Destination
-    Invoke-CheckedCommand -FilePath pnpm -Arguments @("run", "doctor") -WorkingDirectory $Destination
+
+    foreach ($step in @($manifest.verification)) {
+        $verificationRoot = [System.IO.Path]::GetFullPath($Destination)
+        $verificationDirectory = [System.IO.Path]::GetFullPath(
+            (Join-Path $verificationRoot ([string]$step.workingDirectory))
+        )
+        $verificationPrefix = $verificationRoot.TrimEnd(
+            [System.IO.Path]::DirectorySeparatorChar,
+            [System.IO.Path]::AltDirectorySeparatorChar
+        ) + [System.IO.Path]::DirectorySeparatorChar
+
+        if (
+            $verificationDirectory -ne $verificationRoot -and
+            -not $verificationDirectory.StartsWith(
+                $verificationPrefix,
+                [System.StringComparison]::OrdinalIgnoreCase
+            )
+        ) {
+            throw "Verification working directory escapes the destination."
+        }
+
+        Invoke-CheckedCommand `
+            -FilePath $step.command `
+            -Arguments @($step.arguments) `
+            -WorkingDirectory $verificationDirectory
+    }
 
     $repository = ""
     $repositoryProtectionComplete = $true
