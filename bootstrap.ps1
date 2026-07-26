@@ -614,7 +614,15 @@ function Show-BootstrapConfiguration {
     Write-Host "Generated project requirements (not checked by Ibuki):"
 
     foreach ($requirement in @($Manifest.projectRequirements)) {
-        Write-Host "  $($requirement.id) >= $($requirement.minimumVersion)"
+        $versionRequirement = if (
+            @($requirement.PSObject.Properties.Name) -contains "requiredMajor"
+        ) {
+            "major version $($requirement.requiredMajor) required " +
+                "(minimum $($requirement.minimumVersion))"
+        } else {
+            ">= $($requirement.minimumVersion)"
+        }
+        Write-Host "  $($requirement.id) : $versionRequirement"
     }
 
     Write-Host "Project-owned checks (not run by Ibuki):"

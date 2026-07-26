@@ -229,6 +229,15 @@ test("api-spring generation does not inspect JDK and repeats unexecuted checks a
 
     assert.equal(result.status, 0, output);
     assert.match(output, /Project created successfully\./);
+    assert.match(
+      output,
+      /java\s+: major version 17 required \(minimum 17\.0\.0\)/,
+    );
+    assert.match(
+      output,
+      /javac\s+: major version 17 required \(minimum 17\.0\.0\)/,
+    );
+    assert.doesNotMatch(output, /java\s+: >= 17\.0\.0/);
     assert.match(output, /Next\s+: Set-Location -LiteralPath/);
     assert.match(output, /Project-owned checks below were not run by Ibuki:/);
     assert.match(output, /\[systems\/api-server\] \.\/gradlew\.bat check/);
