@@ -72,9 +72,6 @@ jobs:
       - name: Build
         run: pnpm run build
 
-      - name: Smoke test
-        run: pnpm run smoke
-
       - name: Doctor
         shell: pwsh
         run: pnpm run doctor

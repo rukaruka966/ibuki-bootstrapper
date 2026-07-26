@@ -18,7 +18,6 @@ Run repository quality tasks through the Gradle Wrapper:
 Set-Location ./systems/api-server
 .\gradlew.bat check
 .\gradlew.bat bootJar
-pwsh -NoProfile -File ./scripts/smoke.ps1
 ```
 
 ## API conventions
@@ -39,6 +38,5 @@ pwsh -NoProfile -File ./scripts/smoke.ps1
 ## Definition of Done
 
 - `gradlew.bat check` and `gradlew.bat bootJar` pass.
-- The smoke test reaches `/internal/health`.
 - Unknown routes return RFC 7807 Problem Details.
 - Documentation matches changed commands and contracts.

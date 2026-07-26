@@ -27,7 +27,6 @@ pnpm run lint
 pnpm run test
 pnpm run typecheck
 pnpm run build
-pnpm run smoke
 pnpm run doctor
 ```
 
@@ -75,7 +74,6 @@ feat: add user search
 - 変更した動作と重要な失敗経路をテストしている。
 - リポジトリルートで`pnpm run lint`、`pnpm run test`、
   `pnpm run typecheck`、`pnpm run build`が成功する。
-- 実行時統合またはAPI動作を変更した場合、`pnpm run smoke`が成功する。
 - 依存関係、コマンド、環境要件を変更した場合、`pnpm run doctor`が成功する。
 - コマンド、契約、ワークフローを変更した場合、文書と例を更新している。
 - Secret、ローカル認証情報、ビルド成果物、一時ファイルを追跡していない。

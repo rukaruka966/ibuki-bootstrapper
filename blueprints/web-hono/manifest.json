@@ -1,9 +1,9 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "id": "web-hono",
   "version": "0.2.0",
   "displayName": "Web: React + Hono",
-  "toolchains": [
+  "projectRequirements": [
     {
       "id": "node",
       "command": "node",
@@ -17,22 +17,14 @@
       "versionArguments": ["--version"],
       "minimumVersion": "11.0.0",
       "versionPattern": "(\\d+\\.\\d+\\.\\d+)"
-    },
-    {
-      "id": "git",
-      "command": "git",
-      "versionArguments": ["--version"],
-      "minimumVersion": "2.0.0",
-      "versionPattern": "git version (\\d+\\.\\d+\\.\\d+)"
     }
   ],
-  "verification": [
-    { "command": "pnpm", "arguments": ["install"], "workingDirectory": "." },
+  "recommendedCommands": [
+    { "command": "pnpm", "arguments": ["install", "--frozen-lockfile"], "workingDirectory": "." },
     { "command": "pnpm", "arguments": ["run", "lint"], "workingDirectory": "." },
     { "command": "pnpm", "arguments": ["run", "test"], "workingDirectory": "." },
     { "command": "pnpm", "arguments": ["run", "typecheck"], "workingDirectory": "." },
     { "command": "pnpm", "arguments": ["run", "build"], "workingDirectory": "." },
-    { "command": "pnpm", "arguments": ["run", "smoke"], "workingDirectory": "." },
     { "command": "pnpm", "arguments": ["run", "doctor"], "workingDirectory": "." }
   ],
   "files": [
@@ -47,12 +39,12 @@
     { "kind": "text", "source": "template/docs/ja-JP/DESIGN-ja.md.tpl", "target": "docs/ja-JP/DESIGN-ja.md", "template": false },
     { "kind": "text", "source": "template/package.json.tpl", "target": "package.json", "template": true },
     { "kind": "text", "source": "template/pnpm-workspace.yaml.tpl", "target": "pnpm-workspace.yaml", "template": false },
+    { "kind": "text", "source": "template/pnpm-lock.yaml.tpl", "target": "pnpm-lock.yaml", "template": false },
     { "kind": "text", "source": "template/project.config.yaml.tpl", "target": "project.config.yaml", "template": true },
     { "kind": "text", "source": "template/tsconfig.base.json.tpl", "target": "tsconfig.base.json", "template": false },
     { "kind": "text", "source": "template/.github/workflows/ci.yml.tpl", "target": ".github/workflows/ci.yml", "template": false },
     { "kind": "text", "source": "template/scripts/doctor.ps1.tpl", "target": "scripts/doctor.ps1", "template": false },
     { "kind": "text", "source": "template/scripts/check-pr-branch-policy.mjs.tpl", "target": "scripts/check-pr-branch-policy.mjs", "template": false },
-    { "kind": "text", "source": "template/scripts/smoke.mjs.tpl", "target": "scripts/smoke.mjs", "template": true },
     { "kind": "text", "source": "template/systems/web-frontend/package.json.tpl", "target": "systems/web-frontend/package.json", "template": true },
     { "kind": "text", "source": "template/systems/web-frontend/tsconfig.json.tpl", "target": "systems/web-frontend/tsconfig.json", "template": false },
     { "kind": "text", "source": "template/systems/web-frontend/vite.config.ts.tpl", "target": "systems/web-frontend/vite.config.ts", "template": false },

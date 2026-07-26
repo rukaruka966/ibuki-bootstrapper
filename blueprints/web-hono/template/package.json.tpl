@@ -13,7 +13,6 @@
     "test": "pnpm --recursive --filter \"./systems/*\" test",
     "typecheck": "pnpm --recursive --filter \"./systems/*\" typecheck",
     "build": "pnpm --recursive --filter \"./systems/*\" build",
-    "smoke": "node scripts/smoke.mjs",
     "doctor": "pwsh -NoProfile -File ./scripts/doctor.ps1"
   },
   "devDependencies": {

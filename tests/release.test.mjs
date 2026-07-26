@@ -146,6 +146,97 @@ test("standalone script ignores an unrelated repository HEAD", async () => {
   }
 });
 
+test("standalone generation succeeds without a previous release tag", async () => {
+  const fixture = await mkdtemp(path.join(os.tmpdir(), "ibuki-no-tag-"));
+  const fixtureBootstrap = path.join(fixture, "bootstrap.ps1");
+  const blueprintRoot = path.join(fixture, "blueprints", "web-hono");
+  const templateRoot = path.join(blueprintRoot, "template");
+  const destination = path.join(fixture, "generated");
+  const runGit = (...arguments_) =>
+    spawnSync(
+      "git",
+      [
+        "-c",
+        "user.name=No Tag Test",
+        "-c",
+        "user.email=no-tag@example.invalid",
+        ...arguments_,
+      ],
+      { cwd: fixture, encoding: "utf8" },
+    );
+
+  try {
+    await copyFile(bootstrapPath, fixtureBootstrap);
+    await mkdir(templateRoot, { recursive: true });
+    await writeFile(
+      path.join(blueprintRoot, "manifest.json"),
+      `${JSON.stringify(
+        {
+          schemaVersion: 3,
+          id: "web-hono",
+          version: "0.0.0",
+          displayName: "No Tag Test",
+          projectRequirements: [],
+          recommendedCommands: [],
+          files: [
+            {
+              kind: "text",
+              source: "template/README.md.tpl",
+              target: "README.md",
+              template: true,
+            },
+          ],
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+    await writeFile(
+      path.join(templateRoot, "README.md.tpl"),
+      "# __PROJECT_DISPLAY_NAME__\n",
+      "utf8",
+    );
+
+    assert.equal(runGit("init", "-b", "main").status, 0);
+    assert.equal(runGit("add", "--all").status, 0);
+    assert.equal(runGit("commit", "-m", "chore: add no-tag fixture").status, 0);
+
+    const result = spawnSync(
+      "pwsh",
+      [
+        "-NoProfile",
+        "-File",
+        fixtureBootstrap,
+        "-Blueprint",
+        "web-hono",
+        "-ProjectId",
+        "no-tag-test",
+        "-DisplayName",
+        "No Tag Test",
+        "-Destination",
+        destination,
+        "-SkipGitHub",
+        "-NonInteractive",
+        "-Yes",
+      ],
+      {
+        cwd: fixture,
+        encoding: "utf8",
+        timeout: 30_000,
+      },
+    );
+    const output = `${result.stdout}\n${result.stderr}`;
+
+    assert.equal(result.status, 0, output);
+    assert.match(output, /Release\/Tag : Unreleased \(no previous tag\)/);
+    assert.match(output, /Project created successfully/);
+    await access(path.join(destination, "README.md"));
+  } finally {
+    await rm(fixture, { recursive: true, force: true });
+  }
+});
+
 test("partial checkout displays remote metadata for a missing Blueprint", async () => {
   const fixture = await mkdtemp(path.join(os.tmpdir(), "ibuki-partial-"));
   const fixtureBootstrap = path.join(fixture, "bootstrap.ps1");
