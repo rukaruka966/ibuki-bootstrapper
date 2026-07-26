@@ -26,7 +26,6 @@ pnpm run lint
 pnpm run test
 pnpm run typecheck
 pnpm run build
-pnpm run smoke
 pnpm run doctor
 ```
 
@@ -75,7 +74,6 @@ A change is complete when all applicable items below are satisfied:
 - Tests cover changed behavior and important failure paths.
 - `pnpm run lint`, `pnpm run test`, `pnpm run typecheck`, and
   `pnpm run build` pass from the repository root.
-- `pnpm run smoke` passes when runtime integration or API behavior changes.
 - `pnpm run doctor` passes when dependencies, commands, or environment
   requirements change.
 - Documentation and examples match changed commands, contracts, or workflows.

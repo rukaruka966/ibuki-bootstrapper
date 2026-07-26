@@ -14,4 +14,3 @@ Japanese reference: [`docs/ja-JP/DESIGN-ja.md`](docs/ja-JP/DESIGN-ja.md)
 
 - Keep `/internal/health` fast and independent from optional infrastructure.
 - Build one executable Spring Boot JAR.
-- Verify the packaged application with a real HTTP smoke test.

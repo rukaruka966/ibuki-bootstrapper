@@ -1,9 +1,9 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "id": "api-spring",
   "displayName": "Web API: Spring Boot",
   "version": "0.5.0",
-  "toolchains": [
+  "projectRequirements": [
     {
       "id": "java",
       "command": "java",
@@ -21,14 +21,9 @@
       "versionPattern": "(\\d+\\.\\d+\\.\\d+)"
     }
   ],
-  "verification": [
+  "recommendedCommands": [
     { "command": "./gradlew.bat", "arguments": ["check"], "workingDirectory": "systems/api-server" },
-    { "command": "./gradlew.bat", "arguments": ["bootJar"], "workingDirectory": "systems/api-server" },
-    {
-      "command": "pwsh",
-      "arguments": ["-NoProfile", "-File", "./scripts/smoke.ps1"],
-      "workingDirectory": "systems/api-server"
-    }
+    { "command": "./gradlew.bat", "arguments": ["bootJar"], "workingDirectory": "systems/api-server" }
   ],
   "files": [
     { "source": "template/.gitattributes.tpl", "target": ".gitattributes", "kind": "text", "template": false },
@@ -52,7 +47,6 @@
     { "source": "template/.github/workflows/ci.yml.tpl", "target": ".github/workflows/ci.yml", "kind": "text", "template": false },
     { "source": "template/docs/ja-JP/AGENTS-ja.md.tpl", "target": "docs/ja-JP/AGENTS-ja.md", "kind": "text", "template": true },
     { "source": "template/docs/ja-JP/DESIGN-ja.md.tpl", "target": "docs/ja-JP/DESIGN-ja.md", "kind": "text", "template": false },
-    { "source": "template/scripts/smoke.ps1.tpl", "target": "systems/api-server/scripts/smoke.ps1", "kind": "text", "template": false },
     { "source": "template/src/main/kotlin/com/example/application/Application.kt.tpl", "target": "systems/api-server/src/main/kotlin/com/example/application/Application.kt", "kind": "text", "template": false },
     { "source": "template/src/main/kotlin/com/example/application/HealthController.kt.tpl", "target": "systems/api-server/src/main/kotlin/com/example/application/HealthController.kt", "kind": "text", "template": false },
     { "source": "template/src/main/kotlin/com/example/application/ApiExceptionHandler.kt.tpl", "target": "systems/api-server/src/main/kotlin/com/example/application/ApiExceptionHandler.kt", "kind": "text", "template": false },

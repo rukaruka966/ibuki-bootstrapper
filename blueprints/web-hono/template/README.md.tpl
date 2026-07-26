@@ -11,8 +11,10 @@
 
 ## 開発環境の起動
 
+Ibukiはファイル生成だけを行い、以下の依存関係導入やコマンドは実行していません。
+
 ```powershell
-pnpm install
+pnpm install --frozen-lockfile
 pnpm run dev
 ```
 
@@ -26,7 +28,6 @@ pnpm run lint
 pnpm run test
 pnpm run typecheck
 pnpm run build
-pnpm run smoke
 pnpm run doctor
 ```
 

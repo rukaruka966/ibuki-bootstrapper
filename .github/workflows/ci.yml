@@ -48,12 +48,6 @@ jobs:
           node-version: 24
           cache: pnpm
 
-      - name: Setup Java
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: "17"
-
       - name: Validate pull request branch policy
         run: node scripts/check-pr-branch-policy.mjs
         env:
@@ -72,7 +66,7 @@ jobs:
       - name: Unit tests
         run: pnpm run test
 
-      - name: Generated project integration test
+      - name: Generated file contract
         run: pnpm run test:generated
 
   release:

@@ -17,7 +17,6 @@
 Set-Location ./systems/api-server
 .\gradlew.bat check
 .\gradlew.bat bootJar
-pwsh -NoProfile -File ./scripts/smoke.ps1
 ```
 
 ## API規約
@@ -37,6 +36,5 @@ pwsh -NoProfile -File ./scripts/smoke.ps1
 ## 完了条件
 
 - `gradlew.bat check`と`gradlew.bat bootJar`が成功する。
-- Smoke testで`/internal/health`へ疎通できる。
 - 未定義のパスがRFC 7807 Problem Detailsを返す。
 - 文書が変更後のCommandとContractに一致する。

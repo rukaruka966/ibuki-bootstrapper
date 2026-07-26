@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -11,6 +11,98 @@ const repositoryRoot = path.resolve(
   "..",
 );
 const bootstrapPath = path.join(repositoryRoot, "bootstrap.ps1");
+
+async function readTreeBytes(root, relative = "") {
+  const entries = await readdir(path.join(root, relative), {
+    withFileTypes: true,
+  });
+  const files = new Map();
+
+  for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+    const childRelative = path.join(relative, entry.name);
+
+    if (entry.isDirectory()) {
+      const childFiles = await readTreeBytes(root, childRelative);
+      for (const [name, bytes] of childFiles) files.set(name, bytes);
+    } else {
+      files.set(childRelative.replaceAll("\\", "/"), await readFile(path.join(root, childRelative)));
+    }
+  }
+
+  return files;
+}
+
+test("interactive and non-interactive generation produce identical bytes", async () => {
+  const workingDirectory = await mkdtemp(
+    path.join(tmpdir(), "ibuki-mode-parity-"),
+  );
+  const interactiveDestination = path.join(workingDirectory, "mode-parity");
+  const nonInteractiveDestination = path.join(workingDirectory, "noninteractive");
+  const projectId = "mode-parity";
+  const displayName = "Mode parity __PROJECT_ID__";
+
+  try {
+    const interactive = spawnSync(
+      "pwsh",
+      ["-NoProfile", "-File", bootstrapPath],
+      {
+        cwd: workingDirectory,
+        encoding: "utf8",
+        input: [
+          "1",
+          projectId,
+          displayName,
+          "1",
+          "n",
+          "y",
+          "",
+        ].join("\n"),
+        timeout: 30_000,
+      },
+    );
+    const nonInteractive = spawnSync(
+      "pwsh",
+      [
+        "-NoProfile",
+        "-File",
+        bootstrapPath,
+        "-Blueprint",
+        "web-hono",
+        "-ProjectId",
+        projectId,
+        "-DisplayName",
+        displayName,
+        "-Destination",
+        nonInteractiveDestination,
+        "-SkipGitHub",
+        "-NonInteractive",
+        "-Yes",
+      ],
+      { cwd: workingDirectory, encoding: "utf8", timeout: 30_000 },
+    );
+
+    assert.equal(
+      interactive.status,
+      0,
+      `${interactive.stdout}\n${interactive.stderr}`,
+    );
+    assert.equal(
+      nonInteractive.status,
+      0,
+      `${nonInteractive.stdout}\n${nonInteractive.stderr}`,
+    );
+
+    const interactiveTree = await readTreeBytes(interactiveDestination);
+    const nonInteractiveTree = await readTreeBytes(nonInteractiveDestination);
+    assert.deepEqual([...interactiveTree.keys()], [...nonInteractiveTree.keys()]);
+
+    for (const [name, bytes] of interactiveTree) {
+      assert.deepEqual(bytes, nonInteractiveTree.get(name), name);
+    }
+  } finally {
+    await rm(workingDirectory, { recursive: true, force: true });
+  }
+});
 
 test("interactive wizard returns from unavailable choices and cancels safely", async () => {
   const workingDirectory = await mkdtemp(
@@ -100,27 +192,13 @@ test("non-interactive mode rejects an unavailable blueprint before generation", 
   }
 });
 
-test("api-spring rejects JAVA_HOME that differs from PATH JDK", async () => {
+test("api-spring generation does not inspect JDK and repeats unexecuted checks at completion", async () => {
   const workingDirectory = await mkdtemp(
     path.join(tmpdir(), "ibuki-java-home-test-"),
   );
-  const destination = path.join(workingDirectory, "not-created");
-  const fakeJavaHome = path.join(workingDirectory, "path-jdk");
-  const fakeJavaBin = path.join(fakeJavaHome, "bin");
+  const destination = path.join(workingDirectory, "generated-api");
 
   try {
-    await mkdir(fakeJavaBin, { recursive: true });
-    await writeFile(
-      path.join(fakeJavaBin, "java.cmd"),
-      '@echo off\r\necho openjdk version "17.0.1" 1^>^&2\r\n',
-      "utf8",
-    );
-    await writeFile(
-      path.join(fakeJavaBin, "javac.cmd"),
-      "@echo off\r\necho javac 17.0.1\r\n",
-      "utf8",
-    );
-
     const result = spawnSync(
       "pwsh",
       [
@@ -143,19 +221,28 @@ test("api-spring rejects JAVA_HOME that differs from PATH JDK", async () => {
         env: {
           ...process.env,
           JAVA_HOME: path.join(workingDirectory, "different-jdk"),
-          PATH: `${fakeJavaBin}${path.delimiter}${process.env.PATH ?? ""}`,
         },
         timeout: 30_000,
       },
     );
     const output = `${result.stdout}\n${result.stderr}`;
 
-    assert.notEqual(result.status, 0);
+    assert.equal(result.status, 0, output);
+    assert.match(output, /Project created successfully\./);
     assert.match(
       output,
-      /JAVA_HOME must reference the same JDK 17 used by java and javac/,
+      /java\s+: major version 17 required \(minimum 17\.0\.0\)/,
     );
-    await assert.rejects(access(destination));
+    assert.match(
+      output,
+      /javac\s+: major version 17 required \(minimum 17\.0\.0\)/,
+    );
+    assert.doesNotMatch(output, /java\s+: >= 17\.0\.0/);
+    assert.match(output, /Next\s+: Set-Location -LiteralPath/);
+    assert.match(output, /Project-owned checks below were not run by Ibuki:/);
+    assert.match(output, /\[systems\/api-server\] \.\/gradlew\.bat check/);
+    assert.match(output, /\[systems\/api-server\] \.\/gradlew\.bat bootJar/);
+    await access(path.join(destination, "systems", "api-server", "build.gradle.kts"));
   } finally {
     await rm(workingDirectory, { recursive: true, force: true });
   }
@@ -382,7 +469,7 @@ test("local and remote blueprint content paths are explicitly separated", async 
   assert.equal(bootstrap.includes(".ibuki-remote-source"), false);
 });
 
-test("PowerShell and Blueprint-specific toolchains are explicitly enforced", async () => {
+test("only PowerShell is enforced while project requirements are informational", async () => {
   const bootstrap = await import("node:fs/promises").then(({ readFile }) =>
     readFile(bootstrapPath, "utf8"),
   );
@@ -404,20 +491,24 @@ test("PowerShell and Blueprint-specific toolchains are explicitly enforced", asy
   );
 
   assert.match(bootstrap, /PSVersionTable\.PSVersion -lt \[version\]"7\.6"/);
-  assert.match(bootstrap, /function Assert-BlueprintToolchains/);
+  assert.doesNotMatch(bootstrap, /function Assert-BlueprintToolchains/);
+  assert.match(
+    bootstrap,
+    /foreach \(\$step in @\(\$manifest\.recommendedCommands\)\)/,
+  );
+  assert.doesNotMatch(bootstrap, /-FilePath \$step\.command/);
   assert.deepEqual(
-    webManifest.toolchains.map(({ id, minimumVersion }) => [
+    webManifest.projectRequirements.map(({ id, minimumVersion }) => [
       id,
       minimumVersion,
     ]),
     [
       ["node", "24.10.0"],
       ["pnpm", "11.0.0"],
-      ["git", "2.0.0"],
     ],
   );
   assert.deepEqual(
-    springManifest.toolchains.map(({ id, minimumVersion, requiredMajor }) => [
+    springManifest.projectRequirements.map(({ id, minimumVersion, requiredMajor }) => [
       id,
       minimumVersion,
       requiredMajor,

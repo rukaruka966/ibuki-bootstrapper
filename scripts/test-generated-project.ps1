@@ -8,169 +8,170 @@ $temporaryBase = if ($env:RUNNER_TEMP) {
 } else {
     [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
 }
-$temporaryBase = $temporaryBase.TrimEnd(
-    [System.IO.Path]::DirectorySeparatorChar,
-    [System.IO.Path]::AltDirectorySeparatorChar
-)
-$maximumDestinationLength = 96
-$testRootName = "ibuki-$([guid]::NewGuid())"
-$paddingLength = $maximumDestinationLength - $temporaryBase.Length - 1 - $testRootName.Length
+$testRoot = Join-Path $temporaryBase "ibuki-contract-$([guid]::NewGuid())"
+$strictUtf8 = [System.Text.UTF8Encoding]::new($false, $true)
 
-if ($paddingLength -lt 0) {
-    throw (
-        "The temporary base path is too long to test the supported destination boundary: " +
-        "$temporaryBase"
+function Assert-GeneratedBlueprint {
+    param(
+        [Parameter(Mandatory)]
+        [string]$BlueprintId,
+
+        [Parameter(Mandatory)]
+        [string]$ProjectId,
+
+        [Parameter(Mandatory)]
+        [string]$Destination
     )
-}
 
-$testRootName += "x" * $paddingLength
-$testRoot = Join-Path $temporaryBase $testRootName
-
-if ($testRoot.Length -ne $maximumDestinationLength) {
-    throw "Unable to create a $maximumDestinationLength-character generated test path: $testRoot"
-}
-
-try {
     & (Join-Path $repositoryRoot "bootstrap.ps1") `
-        -ProjectId "ibuki-test-project" `
-        -DisplayName 'Ibuki "Test" <Project>' `
-        -Destination $testRoot `
+        -Blueprint $BlueprintId `
+        -ProjectId $ProjectId `
+        -DisplayName 'Ibuki "Contract" <Project>' `
+        -Destination $Destination `
         -SkipGitHub `
         -NonInteractive `
         -Yes
 
     if ($LASTEXITCODE -ne 0) {
-        throw "Generated project verification failed with exit code $LASTEXITCODE."
+        throw "Blueprint generation failed with exit code $LASTEXITCODE`: $BlueprintId"
     }
 
-    $requiredPaths = @(
-        "pnpm-lock.yaml",
-        "project.config.yaml",
-        ".github/workflows/ci.yml",
-        "scripts/check-pr-branch-policy.mjs",
-        "docs/ja-JP/AGENTS-ja.md",
-        "docs/ja-JP/DESIGN-ja.md",
-        "systems/web-frontend/dist/index.html",
-        "systems/api-bff/dist/index.js"
+    $manifestPath = Join-Path $repositoryRoot "blueprints/$BlueprintId/manifest.json"
+    $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+    $generatedFiles = @(
+        Get-ChildItem -LiteralPath $Destination -Recurse -File
     )
 
-    foreach ($relativePath in $requiredPaths) {
-        $path = Join-Path $testRoot $relativePath
+    if ($generatedFiles.Count -ne @($manifest.files).Count) {
+        throw (
+            "Generated file count differs from the manifest for '$BlueprintId': " +
+            "$($generatedFiles.Count) != $(@($manifest.files).Count)"
+        )
+    }
 
-        if (-not (Test-Path -LiteralPath $path)) {
-            throw "Generated verification artifact is missing: $path"
+    foreach ($file in @($manifest.files)) {
+        $target = Join-Path $Destination $file.target
+        $destinationRoot = [System.IO.Path]::GetFullPath($Destination).TrimEnd(
+            [System.IO.Path]::DirectorySeparatorChar
+        )
+        $canonicalTarget = [System.IO.Path]::GetFullPath($target)
+        $requiredPrefix = "$destinationRoot$([System.IO.Path]::DirectorySeparatorChar)"
+
+        if (-not $canonicalTarget.StartsWith(
+            $requiredPrefix,
+            [System.StringComparison]::OrdinalIgnoreCase
+        )) {
+            throw "Manifest target escapes the generated project: $($file.target)"
+        }
+
+        if (-not (Test-Path -LiteralPath $target -PathType Leaf)) {
+            throw "Generated contract artifact is missing: $target"
+        }
+
+        $bytes = [System.IO.File]::ReadAllBytes($target)
+
+        if ($file.kind -eq "binary") {
+            $actualHash = [Convert]::ToHexString(
+                [System.Security.Cryptography.SHA256]::HashData($bytes)
+            ).ToLowerInvariant()
+
+            if ($actualHash -ne $file.sha256) {
+                throw "Generated binary checksum mismatch: $($file.target)"
+            }
+
+            continue
+        }
+
+        if (
+            $bytes.Length -ge 3 -and
+            $bytes[0] -eq 0xEF -and
+            $bytes[1] -eq 0xBB -and
+            $bytes[2] -eq 0xBF
+        ) {
+            throw "Generated text contains a UTF-8 BOM: $($file.target)"
+        }
+
+        try {
+            $content = $strictUtf8.GetString($bytes)
+        } catch [System.Text.DecoderFallbackException] {
+            throw "Generated text is not valid UTF-8: $($file.target)"
+        }
+
+        if ($content.Contains("`r")) {
+            throw "Generated text does not use LF line endings: $($file.target)"
+        }
+
+        if ($content -match '__[A-Z0-9_]+__') {
+            throw "Generated text contains an unresolved template token: $($file.target)"
         }
     }
 
-    $generatedAgents = Get-Content -LiteralPath (Join-Path $testRoot "AGENTS.md") -Raw
-
-    if (
-        $generatedAgents -notmatch '(?m)^## Definition of Done$' -or
-        $generatedAgents -notmatch 'pnpm run typecheck' -or
-        $generatedAgents -notmatch 'explicit human approval'
-    ) {
-        throw "Generated AGENTS.md does not contain the required Definition of Done."
+    foreach ($unexpectedPath in @(
+        "node_modules",
+        "systems/web-frontend/dist",
+        "systems/api-bff/dist",
+        "systems/api-server/build"
+    )) {
+        if (Test-Path -LiteralPath (Join-Path $Destination $unexpectedPath)) {
+            throw "Generation executed a project-owned build step: $unexpectedPath"
+        }
     }
 
-    $generatedJapaneseAgents = Get-Content `
-        -LiteralPath (Join-Path $testRoot "docs/ja-JP/AGENTS-ja.md") `
-        -Raw
+    Write-Host "[OK] $BlueprintId generation contract"
+}
 
-    if (
-        $generatedJapaneseAgents -notmatch [regex]::Escape("Ibuki `"Test`" <Project>") -or
-        $generatedJapaneseAgents -match '__PROJECT_' -or
-        $generatedJapaneseAgents -notmatch 'squash merge' -or
-        $generatedJapaneseAgents -notmatch 'merge commit' -or
-        $generatedJapaneseAgents -notmatch 'main.*develop' -or
-        $generatedJapaneseAgents -notmatch 'strictを無効' -or
-        $generatedJapaneseAgents -notmatch 'strictを有効'
-    ) {
-        throw "Generated Japanese AGENTS reference was not rendered correctly."
+function Assert-NoOverwriteContract {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Destination
+    )
+
+    New-Item -ItemType Directory -Path $Destination | Out-Null
+    $sentinelPath = Join-Path $Destination "existing.txt"
+    [System.IO.File]::WriteAllText(
+        $sentinelPath,
+        "keep",
+        [System.Text.UTF8Encoding]::new($false)
+    )
+
+    & pwsh `
+        -NoProfile `
+        -File (Join-Path $repositoryRoot "bootstrap.ps1") `
+        -Blueprint "web-hono" `
+        -ProjectId "contract-no-overwrite" `
+        -DisplayName "Contract no overwrite" `
+        -Destination $Destination `
+        -SkipGitHub `
+        -NonInteractive `
+        -Yes 2>&1 | Out-Null
+
+    if ($LASTEXITCODE -eq 0) {
+        throw "Generation unexpectedly accepted a non-empty destination."
     }
 
-    if (
-        $generatedAgents -notmatch 'squash merge' -or
-        $generatedAgents -notmatch 'merge commit' -or
-        $generatedAgents -notmatch 'Only `develop` may open' -or
-        $generatedAgents -notmatch 'non-strict on `main`' -or
-        $generatedAgents -notmatch 'strict on `develop`'
-    ) {
-        throw "Generated AGENTS.md does not contain the required merge policy."
+    if ([System.IO.File]::ReadAllText($sentinelPath) -ne "keep") {
+        throw "Generation modified an existing destination file."
     }
 
-    $generatedWorkflow = Get-Content `
-        -LiteralPath (Join-Path $testRoot ".github/workflows/ci.yml") `
-        -Raw
-
-    if (
-        $generatedWorkflow -notmatch 'node scripts/check-pr-branch-policy\.mjs' -or
-        $generatedWorkflow -notmatch 'GITHUB_BASE_REPOSITORY' -or
-        $generatedWorkflow -notmatch 'GITHUB_HEAD_REPOSITORY' -or
-        $generatedWorkflow -notmatch 'head\.repo\.full_name'
-    ) {
-        throw "Generated CI does not enforce the Pull Request branch policy."
+    if (@(Get-ChildItem -LiteralPath $Destination -Force).Count -ne 1) {
+        throw "Generation added files to a non-empty destination."
     }
 
-    $policyScript = Join-Path $testRoot "scripts/check-pr-branch-policy.mjs"
-    $env:GITHUB_EVENT_NAME = "pull_request"
-    $env:GITHUB_BASE_REF = "main"
-    $env:GITHUB_HEAD_REF = "develop"
-    $env:GITHUB_BASE_REPOSITORY = "owner/project"
-    $env:GITHUB_HEAD_REPOSITORY = "owner/project"
-    & node $policyScript
+    Write-Host "[OK] no-overwrite contract"
+}
 
-    if ($LASTEXITCODE -ne 0) {
-        throw "Generated policy rejected the trusted develop branch."
-    }
-
-    $env:GITHUB_HEAD_REPOSITORY = "fork-owner/project"
-    $previousNativeErrorPreference = $PSNativeCommandUseErrorActionPreference
-    $PSNativeCommandUseErrorActionPreference = $false
-
-    try {
-        & node $policyScript 2>$null
-        $forkPolicyExitCode = $LASTEXITCODE
-    } finally {
-        $PSNativeCommandUseErrorActionPreference = $previousNativeErrorPreference
-    }
-
-    if ($forkPolicyExitCode -eq 0) {
-        throw "Generated policy accepted a fork develop branch."
-    }
-
-    & git -C $testRoot init -b main --quiet
-
-    if ($LASTEXITCODE -ne 0) {
-        throw "Unable to initialize the generated project for ignore verification."
-    }
-
-    & git -C $testRoot add --all
-
-    if ($LASTEXITCODE -ne 0) {
-        throw "Unable to stage the generated project for ignore verification."
-    }
-
-    $trackedBuildMetadata = & git -C $testRoot ls-files "*.tsbuildinfo"
-
-    if ($LASTEXITCODE -ne 0) {
-        throw "Unable to inspect tracked TypeScript build metadata."
-    }
-
-    if (-not [string]::IsNullOrWhiteSpace(($trackedBuildMetadata -join "`n"))) {
-        throw "Generated TypeScript build metadata would be included in the initial commit."
-    }
-
-    $unresolvedTokens = Get-ChildItem -LiteralPath $testRoot -Recurse -File |
-        Where-Object {
-            $_.FullName -notmatch '[\\/](node_modules|\.git)[\\/]'
-        } |
-        Select-String -Pattern '__PROJECT_(ID|DISPLAY_NAME|DISPLAY_NAME_(HTML|JSON|YAML))__'
-
-    if ($unresolvedTokens) {
-        throw "Generated project contains unresolved template tokens."
-    }
-
-    Write-Host "Generated project integration test passed." -ForegroundColor Green
+try {
+    New-Item -ItemType Directory -Path $testRoot | Out-Null
+    Assert-GeneratedBlueprint `
+        -BlueprintId "web-hono" `
+        -ProjectId "contract-web" `
+        -Destination (Join-Path $testRoot "web")
+    Assert-GeneratedBlueprint `
+        -BlueprintId "api-spring" `
+        -ProjectId "contract-api" `
+        -Destination (Join-Path $testRoot "api")
+    Assert-NoOverwriteContract -Destination (Join-Path $testRoot "existing")
+    Write-Host "Generated project contract test passed." -ForegroundColor Green
 } finally {
     if (Test-Path -LiteralPath $testRoot) {
         $resolvedTestRoot = [System.IO.Path]::GetFullPath($testRoot)

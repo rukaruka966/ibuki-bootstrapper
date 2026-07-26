@@ -210,9 +210,22 @@ test("repository provisioning verifies ruleset details and final branch", async 
   assert.match(bootstrap, /-ExpectedStrictRequiredChecks \$true/);
   assert.match(bootstrap, /unexpected strict status check policy/);
   assert.match(bootstrap, /currentBranch -ne "develop"/);
+  const cleanGateIndex = bootstrap.indexOf(
+    "Generated repository is not clean before GitHub creation.",
+  );
+  const createRepositoryIndex = bootstrap.indexOf(
+    "Invoke-CheckedCommand -FilePath gh -Arguments $createArguments",
+  );
+  assert.ok(cleanGateIndex > 0);
+  assert.ok(createRepositoryIndex > cleanGateIndex);
+  assert.doesNotMatch(bootstrap, /function Wait-ForQualityWorkflow/);
+  assert.match(
+    bootstrap,
+    /GitHub Actions Quality runs independently after the push\./,
+  );
 });
 
-test("catalog contains two schema v2 Blueprint manifests", async () => {
+test("catalog contains two schema v3 Blueprint manifests", async () => {
   const blueprintIds = ["web-hono", "api-spring"];
 
   for (const blueprintId of blueprintIds) {
@@ -228,11 +241,11 @@ test("catalog contains two schema v2 Blueprint manifests", async () => {
       ),
     );
 
-    assert.equal(manifest.schemaVersion, 2);
+    assert.equal(manifest.schemaVersion, 3);
     assert.equal(manifest.id, blueprintId);
     assert.ok(manifest.displayName.length > 0);
-    assert.ok(manifest.toolchains.length > 0);
-    assert.ok(manifest.verification.length > 0);
+    assert.ok(Array.isArray(manifest.projectRequirements));
+    assert.ok(Array.isArray(manifest.recommendedCommands));
   }
 });
 
@@ -330,10 +343,6 @@ test("binary source pipeline validates all assets before destination creation", 
   const sourceReadIndex = bootstrap.indexOf(
     "$blueprintSources = Read-BlueprintSources",
   );
-  const toolchainIndex = bootstrap.lastIndexOf(
-    "Assert-BlueprintToolchains",
-    sourceReadIndex,
-  );
   const confirmationIndex = bootstrap.indexOf(
     'Confirm-Action -Prompt "Generate this project?"',
   );
@@ -341,8 +350,8 @@ test("binary source pipeline validates all assets before destination creation", 
     "New-Item -ItemType Directory -Path $Destination",
   );
 
-  assert.ok(toolchainIndex > 0);
-  assert.ok(sourceReadIndex > toolchainIndex);
+  assert.doesNotMatch(bootstrap, /Assert-BlueprintToolchains/);
+  assert.ok(sourceReadIndex > 0);
   assert.ok(confirmationIndex > sourceReadIndex);
   assert.ok(firstWriteIndex > confirmationIndex);
   assert.match(bootstrap, /Blueprint binary checksum mismatch/);
@@ -351,15 +360,11 @@ test("binary source pipeline validates all assets before destination creation", 
   assert.match(bootstrap, /BlueprintRevision/);
 });
 
-test("root Quality provisions JDK 17 for Spring generation", async () => {
+test("root Quality checks the generated file contract without provisioning Java", async () => {
   const workflow = await readFile(
     path.join(repositoryRoot, ".github", "workflows", "ci.yml"),
     "utf8",
   );
-  const setupJavaIndex = workflow.indexOf("uses: actions/setup-java@v5");
-  const generatedTestIndex = workflow.indexOf("pnpm run test:generated");
-
-  assert.ok(setupJavaIndex > 0);
-  assert.ok(generatedTestIndex > setupJavaIndex);
-  assert.match(workflow, /java-version: "17"/);
+  assert.doesNotMatch(workflow, /actions\/setup-java/);
+  assert.match(workflow, /pnpm run test:generated/);
 });

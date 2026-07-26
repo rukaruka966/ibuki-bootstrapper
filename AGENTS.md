@@ -2,9 +2,10 @@
 
 ## Purpose
 
-This repository contains Ibuki Bootstrapper. It generates React and Hono or
-Kotlin and Spring Boot projects, verifies them locally, and can provision a
-private GitHub repository.
+This repository contains Ibuki Bootstrapper. It safely generates React and Hono
+or Kotlin and Spring Boot project files and can provision a private GitHub
+repository. Generated-project commands belong to that project and are not part
+of Bootstrapper success.
 
 ## Environment
 
@@ -29,8 +30,8 @@ pnpm run verify
 ```
 
 `pnpm run test:generated` and `pnpm run verify` generate both available
-Blueprints. The `api-spring` integration test therefore requires a real JDK 17;
-a JRE alone is not sufficient.
+Blueprints and verify their file contract. They do not install generated
+dependencies or require Node.js, pnpm, or a JDK on behalf of generated projects.
 
 ## Development rules
 
@@ -40,6 +41,8 @@ a JRE alone is not sufficient.
 - Never overwrite or delete files in a generation destination.
 - Keep interactive prompts and non-interactive CI execution behavior aligned.
 - Validate local generation before making GitHub changes.
+- Do not execute generated-project install, lint, test, build, or startup
+  commands as part of Bootstrapper success.
 - Keep the public entry point self-contained.
 - Use the Blueprint manifest as the source of truth for generated files.
 
