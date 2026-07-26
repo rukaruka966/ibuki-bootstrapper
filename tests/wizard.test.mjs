@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, mkdtemp, rm } from "node:fs/promises";
+import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -105,8 +105,22 @@ test("api-spring rejects JAVA_HOME that differs from PATH JDK", async () => {
     path.join(tmpdir(), "ibuki-java-home-test-"),
   );
   const destination = path.join(workingDirectory, "not-created");
+  const fakeJavaHome = path.join(workingDirectory, "path-jdk");
+  const fakeJavaBin = path.join(fakeJavaHome, "bin");
 
   try {
+    await mkdir(fakeJavaBin, { recursive: true });
+    await writeFile(
+      path.join(fakeJavaBin, "java.cmd"),
+      '@echo off\r\necho openjdk version "17.0.1" 1^>^&2\r\n',
+      "utf8",
+    );
+    await writeFile(
+      path.join(fakeJavaBin, "javac.cmd"),
+      "@echo off\r\necho javac 17.0.1\r\n",
+      "utf8",
+    );
+
     const result = spawnSync(
       "pwsh",
       [
@@ -129,6 +143,7 @@ test("api-spring rejects JAVA_HOME that differs from PATH JDK", async () => {
         env: {
           ...process.env,
           JAVA_HOME: path.join(workingDirectory, "different-jdk"),
+          PATH: `${fakeJavaBin}${path.delimiter}${process.env.PATH ?? ""}`,
         },
         timeout: 30_000,
       },
