@@ -7,11 +7,15 @@ Bootstrapperです。
 必要に応じて、保護された`main`・`develop`ブランチを持つPrivate GitHub
 リポジトリまで自動作成できます。
 
+Ibuki自身の変更履歴は
+[GitHub Releases](https://github.com/rukaruka966/ibuki-bootstrapper/releases)
+で公開します。
+
 ## 必要な環境
 
 - Windows 11
 - PowerShell 7.6以降
-- Node.js 24以降
+- Node.js 24.10.0以降
 - pnpm 11以降
 - Git for Windows
 - `gh auth login`で認証済みのGitHub CLI
@@ -76,6 +80,19 @@ Windows上のpnpm依存解決を安定させるため、正規化後の生成先
 Rulesetでは、Pull Request、未解決スレッドの解消、`Quality`ステータスチェックを
 必須とし、ブランチ削除とforce-pushを禁止します。
 
+## IbukiのRelease
+
+`main`の`Quality`が成功すると、semantic-releaseがConventional Commitから
+次のバージョンを判定し、Git TagとGitHub Releaseを作成します。
+npm packageの公開やRelease用のソースCommitは行いません。
+
+Bootstrapperの開始時には、実行しているCommitとGitHub Releaseの対応を表示します。
+`main`が最新Releaseより先に進んでいる場合は`Unreleased`、GitHub APIから情報を
+取得できない場合は`unavailable`と表示し、プロジェクト生成は継続します。
+
+Repository内の[CHANGELOG.md](CHANGELOG.md)は、変更履歴の正本である
+GitHub Releasesへの案内板です。
+
 ## Coming soon・対象外
 
 次の構成・機能は現時点では生成しません。
@@ -88,4 +105,3 @@ Rulesetでは、Pull Request、未解決スレッドの解消、`Quality`ステ�
 - Windows Desktop: Compose Multiplatform
 - 認証・認可
 - OpenAPI
-- semantic-release

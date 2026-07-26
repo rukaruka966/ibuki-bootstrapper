@@ -45,6 +45,9 @@ test("interactive wizard returns from unavailable choices and cancels safely", a
     const output = `${result.stdout}\n${result.stderr}`;
 
     assert.equal(result.status, 0, output);
+    assert.match(output, /Release\/Tag\s+:/);
+    assert.match(output, /Commit ID\s+:/);
+    assert.match(output, /Channel\s+:/);
     assert.match(output, /React \+ Hono \(available\)/);
     assert.match(output, /React \+ Hono \+ Spring Boot is Coming soon/);
     assert.match(output, /Web API: Spring Boot is Coming soon/);
@@ -319,11 +322,15 @@ test("local and remote blueprint content paths are explicitly separated", async 
   assert.equal(bootstrap.includes(".ibuki-remote-source"), false);
 });
 
-test("PowerShell and pnpm minimum versions are explicitly enforced", async () => {
+test("PowerShell, Node.js, and pnpm minimum versions are explicitly enforced", async () => {
   const bootstrap = await import("node:fs/promises").then(({ readFile }) =>
     readFile(bootstrapPath, "utf8"),
   );
 
   assert.match(bootstrap, /PSVersionTable\.PSVersion -lt \[version\]"7\.6"/);
+  assert.match(
+    bootstrap,
+    /nodeSemanticVersion -lt \[version\]"24\.10\.0"/,
+  );
   assert.match(bootstrap, /pnpmMajor -lt 11/);
 });

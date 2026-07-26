@@ -147,25 +147,150 @@ function Assert-ProjectId {
     }
 }
 
-function Get-SourceCommitId {
-    if (-not [string]::IsNullOrWhiteSpace($BootstrapRoot)) {
-        $gitDirectory = Join-Path $BootstrapRoot ".git"
+function ConvertTo-BootstrapperVersion {
+    param(
+        [string]$Tag
+    )
 
-        if ((Test-Path -LiteralPath $gitDirectory) -and (Get-Command git -ErrorAction SilentlyContinue)) {
-            $commit = & git -C $BootstrapRoot rev-parse --short=12 HEAD 2>$null
+    if ($Tag -match '(?:^v|latest:\s*v)(?<Version>\d+\.\d+\.\d+)(?:\)|$)') {
+        return $Matches.Version
+    }
 
-            if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace(($commit -join ""))) {
-                return ($commit -join "").Trim()
+    return "unavailable"
+}
+
+function Get-LocalReleaseMetadata {
+    if ([string]::IsNullOrWhiteSpace($BootstrapRoot)) {
+        return $null
+    }
+
+    $gitDirectory = Join-Path $BootstrapRoot ".git"
+
+    if (
+        -not (Test-Path -LiteralPath $gitDirectory) -or
+        -not (Get-Command git -ErrorAction SilentlyContinue)
+    ) {
+        return $null
+    }
+
+    $commit = & git -C $BootstrapRoot rev-parse HEAD 2>$null
+
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace(($commit -join ""))) {
+        return $null
+    }
+
+    $fullCommitId = ($commit -join "").Trim()
+    $branch = (& git -C $BootstrapRoot branch --show-current 2>$null) -join ""
+
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($branch)) {
+        $branch = "local"
+    } else {
+        $branch = $branch.Trim()
+    }
+
+    $workingTreeStatus = (& git -C $BootstrapRoot status --porcelain 2>$null) -join ""
+    $isWorkingTreeDirty = $LASTEXITCODE -ne 0 -or
+        -not [string]::IsNullOrWhiteSpace($workingTreeStatus)
+    $pointingTags = @(
+        & git -C $BootstrapRoot tag --points-at HEAD --list "v[0-9]*" 2>$null |
+            Where-Object { $_ -match '^v\d+\.\d+\.\d+$' } |
+            Sort-Object { [version]($_.Substring(1)) } -Descending
+    )
+    $releaseTag = if ($pointingTags.Count -gt 0 -and -not $isWorkingTreeDirty) {
+        $pointingTags[0]
+    } else {
+        $latestTag = & git -C $BootstrapRoot describe `
+            --tags `
+            --match "v[0-9]*" `
+            --abbrev=0 `
+            HEAD `
+            2>$null
+
+        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace(($latestTag -join ""))) {
+            $latestTagName = ($latestTag -join "").Trim()
+
+            if ($isWorkingTreeDirty) {
+                "Unreleased (working tree; latest: $latestTagName)"
+            } else {
+                "Unreleased (latest: $latestTagName)"
             }
+        } else {
+            "Unreleased (no previous tag)"
         }
     }
 
-    try {
-        $commitInfo = Invoke-RestMethod -Uri "https://api.github.com/repos/$($state.BootstrapperRepository)/commits/main"
-        return ([string]$commitInfo.sha).Substring(0, 12)
-    } catch {
-        return "unavailable"
+    return [PSCustomObject]@{
+        ReleaseTag = $releaseTag
+        CommitId = $fullCommitId.Substring(0, [Math]::Min(12, $fullCommitId.Length))
+        FullCommitId = $fullCommitId
+        Channel = $branch
+        Version = ConvertTo-BootstrapperVersion -Tag $releaseTag
     }
+}
+
+function Get-RemoteReleaseMetadata {
+    $apiBaseUrl = "https://api.github.com/repos/$($state.BootstrapperRepository)"
+    $headers = @{
+        Accept = "application/vnd.github+json"
+        "User-Agent" = "Ibuki-Bootstrapper"
+        "X-GitHub-Api-Version" = "2026-03-10"
+    }
+    $fullCommitId = ""
+
+    try {
+        $commitInfo = Invoke-RestMethod `
+            -Uri "$apiBaseUrl/commits/main" `
+            -Headers $headers
+        $fullCommitId = [string]$commitInfo.sha
+    } catch {
+        return [PSCustomObject]@{
+            ReleaseTag = "unavailable"
+            CommitId = "unavailable"
+            FullCommitId = ""
+            Channel = "main"
+            Version = "unavailable"
+        }
+    }
+
+    $releaseTag = "unavailable"
+
+    try {
+        $latestRelease = Invoke-RestMethod `
+            -Uri "$apiBaseUrl/releases/latest" `
+            -Headers $headers
+        $latestTag = [string]$latestRelease.tag_name
+        $encodedTag = [uri]::EscapeDataString($latestTag)
+        $tagCommit = Invoke-RestMethod `
+            -Uri "$apiBaseUrl/commits/$encodedTag" `
+            -Headers $headers
+        $tagCommitId = [string]$tagCommit.sha
+
+        $releaseTag = if ($tagCommitId -eq $fullCommitId) {
+            $latestTag
+        } else {
+            "Unreleased (latest: $latestTag)"
+        }
+    } catch {
+        $releaseTag = "unavailable"
+    }
+
+    return [PSCustomObject]@{
+        ReleaseTag = $releaseTag
+        CommitId = $fullCommitId.Substring(0, [Math]::Min(12, $fullCommitId.Length))
+        FullCommitId = $fullCommitId
+        Channel = "main"
+        Version = ConvertTo-BootstrapperVersion -Tag $releaseTag
+    }
+}
+
+function Get-BootstrapReleaseMetadata {
+    $localMetadata = Get-LocalReleaseMetadata
+
+    if ($null -ne $localMetadata) {
+        return $localMetadata
+    }
+
+    return Get-RemoteReleaseMetadata
 }
 
 function Test-EmptyDirectory {
@@ -1019,14 +1144,15 @@ function Invoke-GitHubProvisioning {
 }
 
 function Invoke-IbukiBootstrap {
-    $sourceCommitId = Get-SourceCommitId
+    $releaseMetadata = Get-BootstrapReleaseMetadata
+    $state.BootstrapperVersion = $releaseMetadata.Version
 
     Write-Host "------------------------------------------------------------"
     Write-Host "Ibuki Bootstrapper"
     Write-Host ""
-    Write-Host "Release/Tag : v$($state.BootstrapperVersion)"
-    Write-Host "Commit ID   : $sourceCommitId"
-    Write-Host "Channel     : main"
+    Write-Host "Release/Tag : $($releaseMetadata.ReleaseTag)"
+    Write-Host "Commit ID   : $($releaseMetadata.CommitId)"
+    Write-Host "Channel     : $($releaseMetadata.Channel)"
     Write-Host "Source      : $($state.BootstrapperRepository)"
     Write-Host "------------------------------------------------------------"
 
@@ -1047,11 +1173,11 @@ function Invoke-IbukiBootstrap {
     $nodeVersion = Get-CommandOutput -FilePath node -Arguments @("--version") -WorkingDirectory (Get-Location).Path
     $pnpmVersion = Get-CommandOutput -FilePath pnpm -Arguments @("--version") -WorkingDirectory (Get-Location).Path
     $gitVersion = Get-CommandOutput -FilePath git -Arguments @("--version") -WorkingDirectory (Get-Location).Path
-    $nodeMajor = [int](($nodeVersion.TrimStart("v") -split "\.")[0])
+    $nodeSemanticVersion = [version]($nodeVersion.TrimStart("v"))
     $pnpmMajor = [int](($pnpmVersion -split "\.")[0])
 
-    if ($nodeMajor -lt 24) {
-        throw "Node.js 24 or later is required. Found: $nodeVersion"
+    if ($nodeSemanticVersion -lt [version]"24.10.0") {
+        throw "Node.js 24.10.0 or later is required. Found: $nodeVersion"
     }
 
     if ($pnpmMajor -lt 11) {

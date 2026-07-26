@@ -5,17 +5,23 @@
   "description": "Bootstrap a production-ready React and Hono project on Windows.",
   "packageManager": "pnpm@11.12.0",
   "engines": {
-    "node": ">=24.0.0",
+    "node": ">=24.10.0",
     "pnpm": ">=11.0.0"
   },
   "scripts": {
     "lint": "oxlint scripts tests && markdownlint \"**/*.md\" --ignore node_modules && pwsh -NoProfile -File ./scripts/check-powershell.ps1",
     "test": "node --test tests/*.test.mjs",
     "test:generated": "pwsh -NoProfile -File ./scripts/test-generated-project.ps1",
+    "release": "semantic-release",
     "verify": "pnpm run lint && pnpm run test && pnpm run test:generated"
   },
   "devDependencies": {
+    "@semantic-release/commit-analyzer": "13.0.1",
+    "@semantic-release/github": "12.0.9",
+    "@semantic-release/release-notes-generator": "14.1.1",
+    "conventional-changelog-conventionalcommits": "10.2.1",
     "markdownlint-cli": "0.49.1",
-    "oxlint": "1.75.0"
+    "oxlint": "1.75.0",
+    "semantic-release": "25.0.8"
   }
 }
