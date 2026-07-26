@@ -109,6 +109,9 @@ test("Bootstrapper and package versions stay synchronized", async () => {
 
   assert.notEqual(versionMatch, null);
   assert.equal(versionMatch[1], packageJson.version);
+
+  const manifest = await readManifest();
+  assert.equal(manifest.version, packageJson.version);
 });
 
 test("generated TypeScript build metadata is ignored", async () => {
@@ -118,6 +121,20 @@ test("generated TypeScript build metadata is ignored", async () => {
   );
 
   assert.match(gitignore, /^\*\.tsbuildinfo$/m);
+});
+
+test("Japanese references do not create nested AGENTS.md instruction files", async () => {
+  const manifest = await readManifest();
+  const targets = manifest.files.map((file) =>
+    file.target.replaceAll("\\", "/"),
+  );
+
+  assert.equal(targets.includes("docs/ja-JP/AGENTS-ja.md"), true);
+  assert.equal(targets.includes("docs/ja-JP/DESIGN-ja.md"), true);
+  assert.equal(
+    targets.some((target) => target !== "AGENTS.md" && target.endsWith("/AGENTS.md")),
+    false,
+  );
 });
 
 test("GitHub ruleset JSON uses a UTF-8 file instead of a pipeline", async () => {

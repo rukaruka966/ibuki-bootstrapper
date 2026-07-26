@@ -26,6 +26,8 @@ try {
     $requiredPaths = @(
         "pnpm-lock.yaml",
         "project.config.yaml",
+        "docs/ja-JP/AGENTS-ja.md",
+        "docs/ja-JP/DESIGN-ja.md",
         "systems/web-frontend/dist/index.html",
         "systems/api-bff/dist/index.js"
     )
@@ -36,6 +38,27 @@ try {
         if (-not (Test-Path -LiteralPath $path)) {
             throw "Generated verification artifact is missing: $path"
         }
+    }
+
+    $generatedAgents = Get-Content -LiteralPath (Join-Path $testRoot "AGENTS.md") -Raw
+
+    if (
+        $generatedAgents -notmatch '(?m)^## Definition of Done$' -or
+        $generatedAgents -notmatch 'pnpm run typecheck' -or
+        $generatedAgents -notmatch 'explicit human approval'
+    ) {
+        throw "Generated AGENTS.md does not contain the required Definition of Done."
+    }
+
+    $generatedJapaneseAgents = Get-Content `
+        -LiteralPath (Join-Path $testRoot "docs/ja-JP/AGENTS-ja.md") `
+        -Raw
+
+    if (
+        $generatedJapaneseAgents -notmatch [regex]::Escape("Ibuki `"Test`" <Project>") -or
+        $generatedJapaneseAgents -match '__PROJECT_'
+    ) {
+        throw "Generated Japanese AGENTS reference was not rendered correctly."
     }
 
     & git -C $testRoot init -b main --quiet
