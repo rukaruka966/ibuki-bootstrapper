@@ -322,11 +322,15 @@ test("local and remote blueprint content paths are explicitly separated", async 
   assert.equal(bootstrap.includes(".ibuki-remote-source"), false);
 });
 
-test("PowerShell and pnpm minimum versions are explicitly enforced", async () => {
+test("PowerShell, Node.js, and pnpm minimum versions are explicitly enforced", async () => {
   const bootstrap = await import("node:fs/promises").then(({ readFile }) =>
     readFile(bootstrapPath, "utf8"),
   );
 
   assert.match(bootstrap, /PSVersionTable\.PSVersion -lt \[version\]"7\.6"/);
+  assert.match(
+    bootstrap,
+    /nodeSemanticVersion -lt \[version\]"24\.10\.0"/,
+  );
   assert.match(bootstrap, /pnpmMajor -lt 11/);
 });

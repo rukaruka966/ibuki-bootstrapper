@@ -9,7 +9,7 @@ project, verifies it locally, and can provision a private GitHub repository.
 
 - Windows 11
 - PowerShell 7.6 or later
-- Node.js 24 or later
+- Node.js 24.10.0 or later
 - pnpm 11 or later
 - Git for Windows
 - GitHub CLI
