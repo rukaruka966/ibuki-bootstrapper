@@ -51,8 +51,3 @@ jobs:
       - name: Build executable JAR
         run: .\gradlew.bat bootJar
         working-directory: systems/api-server
-
-      - name: Smoke test
-        shell: pwsh
-        run: pwsh -NoProfile -File ./scripts/smoke.ps1
-        working-directory: systems/api-server

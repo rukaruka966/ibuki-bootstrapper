@@ -1,9 +1,12 @@
 # Ibuki Bootstrapper
 
 Ibukiは、React + HonoまたはKotlin + Spring Bootで構成される最小プロジェクトを
-生成するBootstrapperです。
+安全に生成するBootstrapperです。
 
-生成後にローカルでlint・テスト・型検査・ビルド・疎通確認を実行します。
+Ibukiの完了条件は、Blueprintで宣言されたファイルを欠落・上書き・文字化けなく
+生成することです。生成先の依存関係導入、lint、テスト、ビルド、起動は行いません。
+必要な環境と推奨コマンドは確認画面に表示し、生成後のプロジェクトとそのCIが
+実行責任を持ちます。
 必要に応じて、保護された`main`・`develop`ブランチを持つPrivate GitHub
 リポジトリまで自動作成できます。
 
@@ -13,14 +16,21 @@ Ibuki自身の変更履歴は
 
 ## 必要な環境
 
+Ibukiでローカルファイルだけを生成する場合:
+
 - Windows 11
 - PowerShell 7.6以降
+
+GitHub Repositoryも作成する場合だけ、次を追加で使用します。
+
 - Git for Windows
 - `gh auth login`で認証済みのGitHub CLI
+- `git config user.name`と`git config user.email`の設定
 
-選択したBlueprintに応じて、次のToolchainだけを追加で使用します。
+生成後のプロジェクトを開発する場合は、選択したBlueprintに応じて次を使用します。
+これらはIbukiによるファイル生成の前提ではありません。
 
-| Blueprint | 必要なToolchain |
+| Blueprint | 生成後の開発環境 |
 | --- | --- |
 | `web-hono` | Node.js 24.10.0以降、pnpm 11以降 |
 | `api-spring` | `java`と`javac`を含むJDK 17 |
@@ -82,7 +92,7 @@ pwsh ./bootstrap.ps1 `
 非対話実行でも、引数は対話ウィザードと同じ共通設定へ変換・検証されます。
 既存のコマンドとの互換性のため、`-Blueprint`を省略した場合は`web-hono`です。
 
-Windows上のpnpm依存解決を安定させるため、正規化後の生成先絶対パスは
+Windows上の各種開発ツールとの互換性を保つため、正規化後の生成先絶対パスは
 96文字以内にしてください。上限を超える場合は、ファイルを作成する前に停止し、
 `C:\workspace\<project-id>`のような短い生成先を案内します。
 
@@ -96,7 +106,7 @@ Windows上のpnpm依存解決を安定させるため、正規化後の生成先
 - `AGENTS.md`と`DESIGN.md`の日本語参考版
 - `/internal/health`ヘルスチェック
 - RFC 7807形式の404レスポンス
-- 単体テスト・型検査・ビルド・実行時スモークテスト
+- 単体テスト・型検査・ビルドを実行するプロジェクト側のコマンドとCI
 - Private GitHubリポジトリの作成
 - `main`・`develop`ブランチの作成とRuleset設定
 
@@ -107,10 +117,14 @@ Windows上のpnpm依存解決を安定させるため、正規化後の生成先
 - `systems/api-server`単独でのtest・executable jar生成
 - `/internal/health`ヘルスチェック
 - `application/problem+json`形式の404レスポンス
-- 起動・HTTP疎通・プロセス終了まで行うスモークテスト
+- 単体テスト・executable jar生成を実行するプロジェクト側のコマンドとCI
 - JDK 17を使用するGitHub Actions `Quality`
 - `AGENTS.md`・`DESIGN.md`と日本語参考版
 - `project.config.yaml`への構成・port・Bootstrapper version記録
+
+Node.js、pnpm、JDKは生成されたプロジェクトを開発するための要件であり、Ibukiが
+ローカルファイルだけを生成する際の前提ではありません。GitHub Repositoryも作成する
+場合に限り、GitとGitHub CLIの利用可否・認証状態を事前確認します。
 
 Rulesetでは、Pull Request、未解決スレッドの解消、`Quality`ステータスチェックを
 必須とし、ブランチ削除とforce-pushを禁止します。
@@ -128,6 +142,14 @@ Workflow自体を変更できるため、この検証は個人開発での誤操
 `main`のstatus checkはstrictを無効にし、release merge commit後に`main`を
 `develop`へ逆同期する作業を不要にします。`develop`ではstrictを有効にし、機能Pull
 Requestを常に最新の`develop`を基準として検証します。
+
+## 生成後の不具合報告
+
+生成直後かつ未変更のプロジェクトで、依存関係の導入、lint、テスト、ビルド、起動、
+または生成先CIに問題がある場合は、使用したIbukiのRelease／Tag、Commit ID、
+Blueprint ID、実行コマンドとエラー内容を添えてIbukiへIssueを作成してください。
+テンプレートを変更した後の問題や、追加した業務機能に起因する問題は、生成先
+プロジェクト側で扱います。
 
 ## IbukiのRelease
 

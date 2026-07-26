@@ -11,7 +11,7 @@
   "scripts": {
     "lint": "oxlint scripts tests && markdownlint \"**/*.md\" --ignore node_modules && pwsh -NoProfile -File ./scripts/check-powershell.ps1",
     "test": "node --test tests/*.test.mjs",
-    "test:generated": "pwsh -NoProfile -File ./scripts/test-generated-project.ps1 && pwsh -NoProfile -File ./scripts/test-generated-spring-project.ps1",
+    "test:generated": "pwsh -NoProfile -File ./scripts/test-generated-project.ps1",
     "release": "semantic-release",
     "verify": "pnpm run lint && pnpm run test && pnpm run test:generated"
   },

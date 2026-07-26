@@ -14,12 +14,13 @@ Gradleは同梱のWrapperを使用するため、別途インストールする�
 
 ## コマンド
 
+Ibukiはファイル生成だけを行い、以下のコマンドは実行していません。
+
 ```powershell
 Set-Location ./systems/api-server
 .\gradlew.bat bootRun
 .\gradlew.bat check
 .\gradlew.bat bootJar
-pwsh -NoProfile -File ./scripts/smoke.ps1
 ```
 
 ## API

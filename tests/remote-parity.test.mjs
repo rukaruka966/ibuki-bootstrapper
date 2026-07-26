@@ -68,6 +68,7 @@ function initializeRepository(directory) {
     ["config", "user.name", "Ibuki Test"],
     ["config", "user.email", "ibuki@example.invalid"],
     ["commit", "--allow-empty", "-m", "test", "--quiet"],
+    ["tag", "v0.5.0"],
   ]) {
     const result = spawnSync("git", ["-C", directory, ...args], {
       encoding: "utf8",
@@ -106,14 +107,17 @@ test("local and HTTP Blueprint sources generate identical bytes", async () => {
   const localDestination = path.join(fixtureRoot, "local-output");
   const remoteDestination = path.join(fixtureRoot, "remote-output");
   const corruptDestination = path.join(fixtureRoot, "corrupt-output");
-  const text = Buffer.from("project=__PROJECT_ID__\n", "utf8");
+  const text = Buffer.from(
+    "project=__PROJECT_ID__\nbootstrap=__BOOTSTRAPPER_VERSION__\n",
+    "utf8",
+  );
   const binary = Buffer.from([0x00, 0xff, 0x0d, 0x0a, 0x7f]);
   const manifest = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     id: "web-hono",
     version: "test",
     displayName: "Parity fixture",
-    toolchains: [
+    projectRequirements: [
       {
         id: "node",
         command: "node",
@@ -122,7 +126,7 @@ test("local and HTTP Blueprint sources generate identical bytes", async () => {
         versionPattern: "v?(\\d+\\.\\d+\\.\\d+)",
       },
     ],
-    verification: [
+    recommendedCommands: [
       {
         command: "node",
         arguments: ["--version"],
@@ -257,6 +261,10 @@ test("local and HTTP Blueprint sources generate identical bytes", async () => {
     for (const [relativePath, localBytes] of localTree) {
       assert.deepEqual(remoteTree.get(relativePath), localBytes, relativePath);
     }
+    assert.equal(
+      localTree.get("project.txt").toString("utf8"),
+      "project=parity-project\nbootstrap=0.5.0\n",
+    );
 
     routes.set(
       "/blueprints/web-hono/template/asset.bin",
