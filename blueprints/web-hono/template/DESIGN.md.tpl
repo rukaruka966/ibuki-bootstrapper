@@ -1,5 +1,7 @@
 # DESIGN.md
 
+Japanese reference: [`docs/ja-JP/DESIGN-ja.md`](docs/ja-JP/DESIGN-ja.md)
+
 ## Principles
 
 - Prefer a neutral, product-specific design over decorative starter UI.

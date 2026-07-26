@@ -1,5 +1,6 @@
 [CmdletBinding()]
 param(
+    [string]$Blueprint,
     [string]$ProjectId,
     [string]$DisplayName,
     [string]$Destination,
@@ -17,7 +18,7 @@ $OutputEncoding = $utf8WithoutBom
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$script:BootstrapperVersion = "0.1.3"
+$script:BootstrapperVersion = "0.2.0"
 $script:BootstrapperRepository = "rukaruka966/ibuki-bootstrapper"
 $script:RawBaseUrl = "https://raw.githubusercontent.com/$($script:BootstrapperRepository)/main"
 $script:CreatedFiles = [System.Collections.Generic.List[string]]::new()
@@ -175,23 +176,316 @@ function Confirm-Action {
     return [string]::IsNullOrWhiteSpace($answer) -or $answer.Trim().ToLowerInvariant() -eq "y"
 }
 
+function Select-Blueprint {
+    while ($true) {
+        Write-Host ""
+        Write-Host "Select a project configuration:"
+        Write-Host "  [1] Web: React + Hono (available)"
+        Write-Host "  [2] Web: React + Hono + Spring Boot (Coming soon)"
+        Write-Host "  [3] Web API: Spring Boot (Coming soon)"
+        Write-Host "  [4] Android: Jetpack Compose (Coming soon)"
+        Write-Host "  [5] Windows Desktop: Compose Multiplatform (Coming soon)"
+        Write-Host "  [0] Cancel"
+
+        $selection = Read-Host "Configuration [default: 1]"
+
+        switch ($selection) {
+            { [string]::IsNullOrWhiteSpace($_) -or $_ -eq "1" } {
+                return "web-hono"
+            }
+            "2" {
+                Write-Warning "Web: React + Hono + Spring Boot is Coming soon. Select an available configuration."
+                continue
+            }
+            "3" {
+                Write-Warning "Web API: Spring Boot is Coming soon. Select an available configuration."
+                continue
+            }
+            "4" {
+                Write-Warning "Android: Jetpack Compose is Coming soon. Select an available configuration."
+                continue
+            }
+            "5" {
+                Write-Warning "Windows Desktop: Compose Multiplatform is Coming soon. Select an available configuration."
+                continue
+            }
+            { $_ -eq "0" -or $_.Trim().ToLowerInvariant() -eq "q" } {
+                return $null
+            }
+            default {
+                Write-Warning "Unknown selection '$selection'. Enter 0, 1, 2, 3, 4, or 5."
+                continue
+            }
+        }
+    }
+}
+
+function Read-GitHubChoice {
+    while ($true) {
+        $answer = Read-Host "Create a private GitHub repository? [Y/n]"
+
+        if ([string]::IsNullOrWhiteSpace($answer) -or $answer.Trim().ToLowerInvariant() -eq "y") {
+            return $true
+        }
+
+        if ($answer.Trim().ToLowerInvariant() -eq "n") {
+            return $false
+        }
+
+        Write-Warning "Enter 'y' or 'n'."
+    }
+}
+
+function Resolve-BootstrapConfiguration {
+    $resolvedBlueprint = $Blueprint
+    $resolvedProjectId = $ProjectId
+    $resolvedDisplayName = $DisplayName
+    $resolvedDestination = $Destination
+    $resolvedRepositoryName = $RepositoryName
+
+    if ($NonInteractive) {
+        if ([string]::IsNullOrWhiteSpace($resolvedBlueprint)) {
+            $resolvedBlueprint = "web-hono"
+        }
+    } else {
+        $resolvedBlueprint = Select-Blueprint
+
+        if ($null -eq $resolvedBlueprint) {
+            return $null
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($resolvedProjectId)) {
+        if ($NonInteractive) {
+            throw "-ProjectId is required in non-interactive mode."
+        }
+
+        $resolvedProjectId = Read-Host "Project ID (lowercase kebab-case)"
+    }
+
+    if ([string]::IsNullOrWhiteSpace($resolvedDisplayName)) {
+        if ($NonInteractive) {
+            $resolvedDisplayName = $resolvedProjectId
+        } else {
+            $resolvedDisplayName = Read-Host "Display name [$resolvedProjectId]"
+
+            if ([string]::IsNullOrWhiteSpace($resolvedDisplayName)) {
+                $resolvedDisplayName = $resolvedProjectId
+            }
+        }
+    }
+
+    if ($UseCurrentDirectory) {
+        $resolvedDestination = (Get-Location).Path
+    } elseif ([string]::IsNullOrWhiteSpace($resolvedDestination)) {
+        if ($NonInteractive) {
+            throw "-Destination or -UseCurrentDirectory is required in non-interactive mode."
+        }
+
+        $locationChoice = Read-Host "Destination: [1] new '$resolvedProjectId' folder, [2] current empty folder [default: 1]"
+
+        if ($locationChoice -eq "2") {
+            $resolvedDestination = (Get-Location).Path
+        } else {
+            $resolvedDestination = Join-Path (Get-Location).Path $resolvedProjectId
+        }
+    }
+
+    $createGitHub = if ($NonInteractive) {
+        -not [bool]$SkipGitHub
+    } elseif ($SkipGitHub) {
+        $false
+    } else {
+        Read-GitHubChoice
+    }
+
+    if ([string]::IsNullOrWhiteSpace($resolvedRepositoryName)) {
+        $resolvedRepositoryName = $resolvedProjectId
+    }
+
+    return [PSCustomObject]@{
+        BlueprintId = $resolvedBlueprint
+        ProjectId = $resolvedProjectId
+        DisplayName = $resolvedDisplayName
+        Destination = [System.IO.Path]::GetFullPath($resolvedDestination)
+        CreateGitHub = $createGitHub
+        GitHubOwner = ""
+        RepositoryName = $resolvedRepositoryName
+        RepositoryDescription = $RepositoryDescription
+    }
+}
+
+function Assert-BootstrapConfiguration {
+    param(
+        [Parameter(Mandatory)]
+        [PSCustomObject]$Configuration
+    )
+
+    if ($Configuration.BlueprintId -ne "web-hono") {
+        throw "Blueprint '$($Configuration.BlueprintId)' is not available. Available blueprint: web-hono."
+    }
+
+    Assert-ProjectId -Value $Configuration.ProjectId -Label "Project ID"
+    Assert-ProjectId -Value $Configuration.RepositoryName -Label "Repository name"
+
+    if ($Configuration.DisplayName -match "[`r`n]") {
+        throw "Display name cannot contain newlines."
+    }
+
+    if (-not (Test-EmptyDirectory -Path $Configuration.Destination)) {
+        throw "Destination must be an empty directory: $($Configuration.Destination)"
+    }
+}
+
+function Show-BootstrapConfiguration {
+    param(
+        [Parameter(Mandatory)]
+        [PSCustomObject]$Configuration
+    )
+
+    Write-Phase -Name "Confirmation"
+    Write-Host "Blueprint ID      : $($Configuration.BlueprintId)"
+    Write-Host "Project ID        : $($Configuration.ProjectId)"
+    Write-Host "Display name      : $($Configuration.DisplayName)"
+    Write-Host "Destination       : $($Configuration.Destination)"
+
+    if ($Configuration.CreateGitHub) {
+        Write-Host "GitHub repository : $($Configuration.GitHubOwner)/$($Configuration.RepositoryName) (private)"
+        Write-Host "Branches          : main, develop"
+    } else {
+        Write-Host "GitHub            : skipped"
+        Write-Host "Branches          : none (local generation only)"
+    }
+
+    Write-Host "Local verification:"
+    Write-Host "  pnpm install"
+    Write-Host "  pnpm run lint"
+    Write-Host "  pnpm run test"
+    Write-Host "  pnpm run typecheck"
+    Write-Host "  pnpm run build"
+    Write-Host "  pnpm run smoke"
+    Write-Host "  pnpm run doctor"
+}
+
 function Get-TemplateContent {
     param(
         [Parameter(Mandatory)]
         [string]$Source,
 
+        [string]$LocalBlueprintRoot = "",
+
         [Parameter(Mandatory)]
-        [string]$LocalBlueprintRoot
+        [string]$BlueprintId,
+
+        [switch]$UseLocalBlueprint
     )
 
-    $localPath = Join-Path $LocalBlueprintRoot ($Source -replace '/', [System.IO.Path]::DirectorySeparatorChar)
+    if ($UseLocalBlueprint) {
+        $localPath = Join-Path $LocalBlueprintRoot (
+            $Source -replace '/', [System.IO.Path]::DirectorySeparatorChar
+        )
 
-    if (Test-Path -LiteralPath $localPath) {
+        if (-not (Test-Path -LiteralPath $localPath -PathType Leaf)) {
+            throw "Local blueprint '$BlueprintId' is missing its manifest source: $Source"
+        }
+
         return Get-Content -LiteralPath $localPath -Raw
     }
 
-    $uri = "$($script:RawBaseUrl)/blueprints/web-hono/$Source"
+    $uri = "$($script:RawBaseUrl)/blueprints/$BlueprintId/$Source"
     return (Invoke-WebRequest -Uri $uri -UseBasicParsing).Content
+}
+
+function Assert-BlueprintManifest {
+    param(
+        [Parameter(Mandatory)]
+        [object]$Manifest,
+
+        [Parameter(Mandatory)]
+        [string]$BlueprintId,
+
+        [string]$LocalBlueprintRoot = "",
+
+        [switch]$UseLocalBlueprint
+    )
+
+    if ($Manifest.id -ne $BlueprintId) {
+        throw "Blueprint manifest ID '$($Manifest.id)' does not match '$BlueprintId'."
+    }
+
+    if (@($Manifest.files).Count -eq 0) {
+        throw "Blueprint manifest '$BlueprintId' does not contain any files."
+    }
+
+    $targets = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::OrdinalIgnoreCase
+    )
+    $validationRoot = [System.IO.Path]::GetFullPath(
+        (Join-Path ([System.IO.Path]::GetTempPath()) "ibuki-manifest-validation")
+    )
+    $validationPrefix = $validationRoot.TrimEnd(
+        [System.IO.Path]::DirectorySeparatorChar,
+        [System.IO.Path]::AltDirectorySeparatorChar
+    ) + [System.IO.Path]::DirectorySeparatorChar
+
+    foreach ($file in @($Manifest.files)) {
+        $propertyNames = @($file.PSObject.Properties.Name)
+
+        foreach ($requiredProperty in @("source", "target", "template")) {
+            if ($propertyNames -notcontains $requiredProperty) {
+                throw "Blueprint manifest '$BlueprintId' contains an entry without '$requiredProperty'."
+            }
+        }
+
+        if ($file.source -isnot [string] -or $file.target -isnot [string]) {
+            throw "Blueprint manifest '$BlueprintId' source and target values must be strings."
+        }
+
+        if (
+            [string]::IsNullOrWhiteSpace($file.source) -or
+            [System.IO.Path]::IsPathRooted($file.source) -or
+            @($file.source -split '[\\/]').Contains("..")
+        ) {
+            throw "Blueprint manifest '$BlueprintId' contains an unsafe source path: '$($file.source)'."
+        }
+
+        if (
+            [string]::IsNullOrWhiteSpace($file.target) -or
+            [System.IO.Path]::IsPathRooted($file.target) -or
+            @($file.target -split '[\\/]').Contains("..")
+        ) {
+            throw "Blueprint manifest '$BlueprintId' contains an unsafe target path: '$($file.target)'."
+        }
+
+        $canonicalTarget = [System.IO.Path]::GetFullPath(
+            (Join-Path $validationRoot $file.target)
+        )
+
+        if (-not $canonicalTarget.StartsWith(
+            $validationPrefix,
+            [System.StringComparison]::OrdinalIgnoreCase
+        )) {
+            throw "Blueprint manifest '$BlueprintId' contains an unsafe target path: '$($file.target)'."
+        }
+
+        if (-not $targets.Add($canonicalTarget)) {
+            throw "Blueprint manifest '$BlueprintId' contains a duplicate target: '$($file.target)'."
+        }
+
+        if ($file.template -isnot [bool]) {
+            throw "Blueprint manifest '$BlueprintId' has a non-boolean template flag for '$($file.target)'."
+        }
+
+        if ($UseLocalBlueprint) {
+            $localSource = Join-Path $LocalBlueprintRoot (
+                $file.source -replace '/', [System.IO.Path]::DirectorySeparatorChar
+            )
+
+            if (-not (Test-Path -LiteralPath $localSource -PathType Leaf)) {
+                throw "Local blueprint '$BlueprintId' is missing its manifest source: $($file.source)"
+            }
+        }
+    }
 }
 
 function Convert-TemplateContent {
@@ -239,19 +533,80 @@ function Write-GeneratedFile {
         throw "Blueprint target escapes the destination: $RelativePath"
     }
 
-    if (Test-Path -LiteralPath $targetPath) {
-        throw "Refusing to overwrite an existing path: $targetPath"
-    }
-
     $parent = Split-Path -Parent $targetPath
+
+    Assert-NoReparsePoint `
+        -DestinationRoot $normalizedRoot `
+        -TargetParent $parent
 
     if (-not (Test-Path -LiteralPath $parent)) {
         New-Item -ItemType Directory -Path $parent -Force | Out-Null
     }
 
+    Assert-NoReparsePoint `
+        -DestinationRoot $normalizedRoot `
+        -TargetParent $parent
+
     $normalizedContent = $Content -replace "`r`n", "`n"
-    Set-Content -LiteralPath $targetPath -Value $normalizedContent -Encoding utf8NoBOM -NoNewline
+    $stream = $null
+    $writer = $null
+
+    try {
+        $stream = [System.IO.File]::Open(
+            $targetPath,
+            [System.IO.FileMode]::CreateNew,
+            [System.IO.FileAccess]::Write,
+            [System.IO.FileShare]::None
+        )
+        $writer = [System.IO.StreamWriter]::new(
+            $stream,
+            [System.Text.UTF8Encoding]::new($false)
+        )
+        $writer.Write($normalizedContent)
+    } catch [System.IO.IOException] {
+        throw "Refusing to overwrite or race with an existing path: $targetPath"
+    } finally {
+        if ($null -ne $writer) {
+            $writer.Dispose()
+        } elseif ($null -ne $stream) {
+            $stream.Dispose()
+        }
+    }
+
     $script:CreatedFiles.Add($targetPath)
+}
+
+function Assert-NoReparsePoint {
+    param(
+        [Parameter(Mandatory)]
+        [string]$DestinationRoot,
+
+        [Parameter(Mandatory)]
+        [string]$TargetParent
+    )
+
+    $relativeParent = [System.IO.Path]::GetRelativePath($DestinationRoot, $TargetParent)
+    $current = $DestinationRoot
+    $paths = @($DestinationRoot)
+
+    if ($relativeParent -ne ".") {
+        foreach ($segment in $relativeParent -split '[\\/]') {
+            $current = Join-Path $current $segment
+            $paths += $current
+        }
+    }
+
+    foreach ($path in $paths) {
+        if (-not (Test-Path -LiteralPath $path)) {
+            continue
+        }
+
+        $item = Get-Item -LiteralPath $path -Force
+
+        if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Refusing to generate through a reparse point: $path"
+        }
+    }
 }
 
 function Wait-ForQualityWorkflow {
@@ -606,20 +961,47 @@ function Invoke-IbukiBootstrap {
     }
 
     Write-Phase -Name "Preflight"
+
+    if ($PSVersionTable.PSVersion -lt [version]"7.6") {
+        throw "PowerShell 7.6 or later is required. Found: $($PSVersionTable.PSVersion)"
+    }
+
     Assert-Command -Name git
     Assert-Command -Name node
     Assert-Command -Name pnpm
 
     $nodeVersion = Get-CommandOutput -FilePath node -Arguments @("--version") -WorkingDirectory (Get-Location).Path
+    $pnpmVersion = Get-CommandOutput -FilePath pnpm -Arguments @("--version") -WorkingDirectory (Get-Location).Path
+    $gitVersion = Get-CommandOutput -FilePath git -Arguments @("--version") -WorkingDirectory (Get-Location).Path
     $nodeMajor = [int](($nodeVersion.TrimStart("v") -split "\.")[0])
+    $pnpmMajor = [int](($pnpmVersion -split "\.")[0])
 
     if ($nodeMajor -lt 24) {
         throw "Node.js 24 or later is required. Found: $nodeVersion"
     }
 
-    $owner = ""
+    if ($pnpmMajor -lt 11) {
+        throw "pnpm 11 or later is required. Found: $pnpmVersion"
+    }
 
-    if (-not $SkipGitHub) {
+    Write-Host ""
+    Write-Host "Detected environment:"
+    Write-Host "  PowerShell : $($PSVersionTable.PSVersion)"
+    Write-Host "  Node.js    : $nodeVersion"
+    Write-Host "  pnpm       : $pnpmVersion"
+    Write-Host "  Git        : $gitVersion"
+
+    Write-Phase -Name "Project"
+    $configuration = Resolve-BootstrapConfiguration
+
+    if ($null -eq $configuration) {
+        Write-Host "Cancelled."
+        return
+    }
+
+    Assert-BootstrapConfiguration -Configuration $configuration
+
+    if ($configuration.CreateGitHub) {
         Assert-Command -Name gh
         Invoke-CheckedCommand -FilePath gh -Arguments @(
             "auth",
@@ -635,6 +1017,7 @@ function Invoke-IbukiBootstrap {
             "--jq",
             ".login"
         ) -WorkingDirectory (Get-Location).Path
+        $configuration.GitHubOwner = $owner
 
         $gitUserName = Get-CommandOutput -FilePath git -Arguments @(
             "config",
@@ -648,113 +1031,64 @@ function Invoke-IbukiBootstrap {
         if ([string]::IsNullOrWhiteSpace($gitUserName) -or [string]::IsNullOrWhiteSpace($gitUserEmail)) {
             throw "Git user.name and user.email must be configured before GitHub provisioning."
         }
-    }
 
-    Write-Phase -Name "Project"
-
-    if ([string]::IsNullOrWhiteSpace($ProjectId)) {
-        if ($NonInteractive) {
-            throw "-ProjectId is required in non-interactive mode."
-        }
-
-        $ProjectId = Read-Host "Project ID (lowercase kebab-case)"
-    }
-
-    Assert-ProjectId -Value $ProjectId -Label "Project ID"
-
-    if ([string]::IsNullOrWhiteSpace($DisplayName)) {
-        if ($NonInteractive) {
-            $DisplayName = $ProjectId
-        } else {
-            $DisplayName = Read-Host "Display name [$ProjectId]"
-
-            if ([string]::IsNullOrWhiteSpace($DisplayName)) {
-                $DisplayName = $ProjectId
-            }
-        }
-    }
-
-    if ($DisplayName -match "[`r`n]") {
-        throw "Display name cannot contain newlines."
-    }
-
-    if ($UseCurrentDirectory) {
-        $Destination = (Get-Location).Path
-    } elseif ([string]::IsNullOrWhiteSpace($Destination)) {
-        if ($NonInteractive) {
-            throw "-Destination or -UseCurrentDirectory is required in non-interactive mode."
-        }
-
-        $locationChoice = Read-Host "Destination: [1] new '$ProjectId' folder, [2] current empty folder [default: 1]"
-
-        if ($locationChoice -eq "2") {
-            $Destination = (Get-Location).Path
-        } else {
-            $Destination = Join-Path (Get-Location).Path $ProjectId
-        }
-    }
-
-    $Destination = [System.IO.Path]::GetFullPath($Destination)
-
-    if (-not (Test-EmptyDirectory -Path $Destination)) {
-        throw "Destination must be an empty directory: $Destination"
-    }
-
-    if ([string]::IsNullOrWhiteSpace($RepositoryName)) {
-        $RepositoryName = $ProjectId
-    }
-
-    Assert-ProjectId -Value $RepositoryName -Label "Repository name"
-
-    if (-not $SkipGitHub) {
-        & gh repo view "$owner/$RepositoryName" --json name 2>$null | Out-Null
+        & gh repo view "$owner/$($configuration.RepositoryName)" --json name 2>$null | Out-Null
 
         if ($LASTEXITCODE -eq 0) {
-            throw "GitHub repository already exists: $owner/$RepositoryName"
+            throw "GitHub repository already exists: $owner/$($configuration.RepositoryName)"
         }
     }
 
-    Write-Host ""
-    Write-Host "Project ID        : $ProjectId"
-    Write-Host "Display name      : $DisplayName"
-    Write-Host "Destination       : $Destination"
-    Write-Host "Blueprint         : web-hono"
-
-    if ($SkipGitHub) {
-        Write-Host "GitHub            : skipped"
-    } else {
-        Write-Host "GitHub account    : $owner"
-        Write-Host "GitHub repository : $owner/$RepositoryName (private)"
-        Write-Host "Branches          : main, develop"
-    }
+    Show-BootstrapConfiguration -Configuration $configuration
 
     if (-not (Confirm-Action -Prompt "Generate this project?")) {
         Write-Host "Cancelled."
         return
     }
 
-    Write-Phase -Name "Generate"
-
-    if (-not (Test-Path -LiteralPath $Destination)) {
-        New-Item -ItemType Directory -Path $Destination -Force | Out-Null
+    if (-not (Test-EmptyDirectory -Path $configuration.Destination)) {
+        throw "Destination changed after confirmation and is no longer empty: $($configuration.Destination)"
     }
 
+    $Blueprint = $configuration.BlueprintId
+    $ProjectId = $configuration.ProjectId
+    $DisplayName = $configuration.DisplayName
+    $Destination = $configuration.Destination
+    $RepositoryName = $configuration.RepositoryName
+
+    Write-Phase -Name "Generate"
+
     $localBlueprintRoot = ""
+    $useLocalBlueprint = $false
 
     if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
-        $candidate = Join-Path $PSScriptRoot "blueprints/web-hono"
+        $candidate = Join-Path $PSScriptRoot "blueprints/$Blueprint"
 
         if (Test-Path -LiteralPath $candidate) {
             $localBlueprintRoot = $candidate
+            $useLocalBlueprint = $true
         }
     }
 
     if ([string]::IsNullOrWhiteSpace($localBlueprintRoot)) {
-        $manifest = Invoke-RestMethod -Uri "$($script:RawBaseUrl)/blueprints/web-hono/manifest.json"
-        $localBlueprintRoot = Join-Path $Destination ".ibuki-remote-source"
+        $manifest = Invoke-RestMethod -Uri "$($script:RawBaseUrl)/blueprints/$Blueprint/manifest.json"
     } else {
         $manifestPath = Join-Path $localBlueprintRoot "manifest.json"
         $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+    }
+
+    Assert-BlueprintManifest `
+        -Manifest $manifest `
+        -BlueprintId $Blueprint `
+        -LocalBlueprintRoot $localBlueprintRoot `
+        -UseLocalBlueprint:$useLocalBlueprint
+
+    if (-not (Test-EmptyDirectory -Path $Destination)) {
+        throw "Destination changed before generation and is no longer empty: $Destination"
+    }
+
+    if (-not (Test-Path -LiteralPath $Destination)) {
+        New-Item -ItemType Directory -Path $Destination -Force | Out-Null
     }
 
     $displayNameYaml = $DisplayName.Replace("\", "\\").Replace('"', '\"')
@@ -770,7 +1104,11 @@ function Invoke-IbukiBootstrap {
     }
 
     foreach ($file in $manifest.files) {
-        $content = Get-TemplateContent -Source $file.source -LocalBlueprintRoot $localBlueprintRoot
+        $content = Get-TemplateContent `
+            -Source $file.source `
+            -LocalBlueprintRoot $localBlueprintRoot `
+            -BlueprintId $Blueprint `
+            -UseLocalBlueprint:$useLocalBlueprint
 
         if ($file.template) {
             $content = Convert-TemplateContent -Content $content -Tokens $tokens
@@ -796,12 +1134,12 @@ function Invoke-IbukiBootstrap {
     $repository = ""
     $repositoryProtectionComplete = $true
 
-    if (-not $SkipGitHub) {
+    if ($configuration.CreateGitHub) {
         $provisioningResult = Invoke-GitHubProvisioning `
             -ProjectRoot $Destination `
-            -Owner $owner `
+            -Owner $configuration.GitHubOwner `
             -RepoName $RepositoryName `
-            -Description $RepositoryDescription
+            -Description $configuration.RepositoryDescription
         $repository = $provisioningResult.Repository
         $repositoryProtectionComplete = $provisioningResult.ProtectionComplete
     }
