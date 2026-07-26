@@ -398,6 +398,7 @@ test("PowerShell and Blueprint-specific toolchains are explicitly enforced", asy
     [
       ["node", "24.10.0"],
       ["pnpm", "11.0.0"],
+      ["git", "2.0.0"],
     ],
   );
   assert.deepEqual(

@@ -17,6 +17,13 @@
       "versionArguments": ["--version"],
       "minimumVersion": "11.0.0",
       "versionPattern": "(\\d+\\.\\d+\\.\\d+)"
+    },
+    {
+      "id": "git",
+      "command": "git",
+      "versionArguments": ["--version"],
+      "minimumVersion": "2.0.0",
+      "versionPattern": "git version (\\d+\\.\\d+\\.\\d+)"
     }
   ],
   "verification": [
