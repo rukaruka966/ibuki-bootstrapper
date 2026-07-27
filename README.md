@@ -189,9 +189,16 @@ npm packageの公開やRelease用のソースCommitは行いません。
 
 Bootstrapperの開始時には、実行しているCommitとGitHub Releaseの対応を表示します。
 `main`が最新Releaseより先に進んでいる場合は`Unreleased`と表示します。Release情報
-だけを取得できない場合は`unavailable`と表示して生成を継続します。ただしremote実行
-で`main`のCommit自体を解決できない場合は、Manifestとassetを同一Commitから取得する
-保証ができないため、ファイル生成前に停止します。
+だけを取得できない場合は`unavailable`と表示して生成を継続します。
+
+未認証GitHub APIがrate limitまたは通信エラーになった場合は、GitHub CLIが利用可能
+かつ認証済みなら`gh api`へ自動的にフォールバックします。token自体は取得・表示せず、
+認証はGitHub CLI自身が扱います。GitHub CLIはローカル生成の無条件要件ではなく、
+未認証APIが成功する場合は従来どおりPowerShellだけでmetadataを取得します。
+
+remote実行で両方の経路から`main`のCommitを解決できない場合は、Manifestとassetを
+同一Commitから取得する保証ができないため、rate limitのreset時刻など取得できた
+診断情報を表示し、ファイル生成前に停止します。
 
 Repository内の[CHANGELOG.md](CHANGELOG.md)は、変更履歴の正本である
 GitHub Releasesへの案内板です。
