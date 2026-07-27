@@ -16,11 +16,36 @@ async function readManifest() {
   return JSON.parse(await readFile(manifestPath, "utf8"));
 }
 
+async function readResolvedFiles(blueprintId) {
+  const root = path.join(repositoryRoot, "blueprints", blueprintId);
+  const manifest = JSON.parse(
+    await readFile(path.join(root, "manifest.json"), "utf8"),
+  );
+  const resolved = manifest.files.map((file) => ({ file, root }));
+
+  for (const fileSetId of manifest.fileSets) {
+    const fileSetRoot = path.join(
+      repositoryRoot,
+      "blueprints",
+      "_common",
+      fileSetId,
+    );
+    const fileSetManifest = JSON.parse(
+      await readFile(path.join(fileSetRoot, "manifest.json"), "utf8"),
+    );
+    resolved.push(
+      ...fileSetManifest.files.map((file) => ({ file, root: fileSetRoot })),
+    );
+  }
+
+  return { manifest, resolved };
+}
+
 test("manifest targets are unique and safe", async () => {
-  const manifest = await readManifest();
+  const { resolved } = await readResolvedFiles("web-hono");
   const targets = new Set();
 
-  for (const file of manifest.files) {
+  for (const { file } of resolved) {
     assert.equal(path.isAbsolute(file.target), false);
     assert.equal(file.target.includes(".."), false);
     assert.equal(targets.has(file.target), false, `duplicate: ${file.target}`);
@@ -29,10 +54,10 @@ test("manifest targets are unique and safe", async () => {
 });
 
 test("every manifest source exists and uses LF", async () => {
-  const manifest = await readManifest();
+  const { resolved } = await readResolvedFiles("web-hono");
 
-  for (const file of manifest.files) {
-    const sourcePath = path.join(blueprintRoot, file.source);
+  for (const { file, root } of resolved) {
+    const sourcePath = path.join(root, file.source);
     assert.equal((await stat(sourcePath)).isFile(), true);
 
     const content = await readFile(sourcePath, "utf8");
@@ -47,7 +72,10 @@ test("root and generated pull request policies stay identical", async () => {
   );
   const generatedPolicy = await readFile(
     path.join(
-      blueprintRoot,
+      repositoryRoot,
+      "blueprints",
+      "_common",
+      "repository",
       "template",
       "scripts",
       "check-pr-branch-policy.mjs.tpl",
@@ -59,7 +87,7 @@ test("root and generated pull request policies stay identical", async () => {
 });
 
 test("template files use only supported tokens", async () => {
-  const manifest = await readManifest();
+  const { resolved } = await readResolvedFiles("web-hono");
   const supportedTokens = new Set([
     "__BOOTSTRAPPER_VERSION__",
     "__PROJECT_ID__",
@@ -71,8 +99,8 @@ test("template files use only supported tokens", async () => {
     "__BASE_PACKAGE_PATH__",
   ]);
 
-  for (const file of manifest.files) {
-    const sourcePath = path.join(blueprintRoot, file.source);
+  for (const { file, root } of resolved) {
+    const sourcePath = path.join(root, file.source);
     const content = await readFile(sourcePath, "utf8");
     const tokens = content.match(/__[A-Z0-9_]+__/g) ?? [];
 
@@ -116,6 +144,169 @@ test("blueprint dependencies are pinned", async () => {
   }
 });
 
+test("all Blueprints use one root pnpm release contract", async () => {
+  const releaseDependencies = {
+    "@semantic-release/commit-analyzer": "13.0.1",
+    "@semantic-release/github": "12.0.9",
+    "@semantic-release/release-notes-generator": "14.1.1",
+    "conventional-changelog-conventionalcommits": "9.3.1",
+    "semantic-release": "25.0.8",
+  };
+
+  for (const blueprintId of [
+    "web-hono",
+    "api-spring",
+    "api-spring-postgres",
+  ]) {
+    const root = path.join(repositoryRoot, "blueprints", blueprintId);
+    const packageJson = JSON.parse(
+      await readFile(path.join(root, "template", "package.json.tpl"), "utf8"),
+    );
+    const { resolved } = await readResolvedFiles(blueprintId);
+    const lockTargets = resolved.filter(
+      ({ file }) => file.target === "pnpm-lock.yaml",
+    );
+
+    assert.equal(packageJson.packageManager, "pnpm@11.12.0");
+    assert.equal(packageJson.scripts.release, "semantic-release");
+    assert.equal(
+      packageJson.scripts["test:release"],
+      "node --test tests/release-notes.test.mjs",
+    );
+    assert.deepEqual(
+      Object.fromEntries(
+        Object.keys(releaseDependencies).map((name) => [
+          name,
+          packageJson.devDependencies[name],
+        ]),
+      ),
+      releaseDependencies,
+    );
+    assert.equal(lockTargets.length, 1, `${blueprintId} root lockfile`);
+  }
+});
+
+test("common file sets are non-recursive and shared by every Blueprint", async () => {
+  for (const fileSetId of ["repository", "spring-gradle"]) {
+    const manifest = JSON.parse(
+      await readFile(
+        path.join(
+          repositoryRoot,
+          "blueprints",
+          "_common",
+          fileSetId,
+          "manifest.json",
+        ),
+        "utf8",
+      ),
+    );
+
+    assert.equal(manifest.schemaVersion, 5);
+    assert.deepEqual(manifest.fileSets, []);
+    assert.deepEqual(manifest.projectRequirements, []);
+    assert.deepEqual(manifest.recommendedCommands, []);
+    assert.ok(manifest.files.length > 0);
+  }
+
+  for (const blueprintId of [
+    "web-hono",
+    "api-spring",
+    "api-spring-postgres",
+  ]) {
+    const manifest = JSON.parse(
+      await readFile(
+        path.join(repositoryRoot, "blueprints", blueprintId, "manifest.json"),
+        "utf8",
+      ),
+    );
+    assert.ok(manifest.fileSets.includes("repository"));
+  }
+});
+
+test("common Release workflow is reusable and waits behind Quality callers", async () => {
+  const commonWorkflow = await readFile(
+    path.join(
+      repositoryRoot,
+      "blueprints",
+      "_common",
+      "repository",
+      "template",
+      ".github",
+      "workflows",
+      "release.yml.tpl",
+    ),
+    "utf8",
+  );
+
+  assert.match(commonWorkflow, /workflow_call:/);
+  assert.match(commonWorkflow, /contents: write/);
+  assert.match(commonWorkflow, /fetch-depth: 0/);
+  assert.match(commonWorkflow, /pnpm install --frozen-lockfile/);
+  assert.match(commonWorkflow, /run: pnpm release/);
+
+  for (const blueprintId of [
+    "web-hono",
+    "api-spring",
+    "api-spring-postgres",
+  ]) {
+    const workflow = await readFile(
+      path.join(
+        repositoryRoot,
+        "blueprints",
+        blueprintId,
+        "template",
+        ".github",
+        "workflows",
+        "ci.yml.tpl",
+      ),
+      "utf8",
+    );
+    assert.match(workflow, /release:\n\s+name: Release/);
+    assert.match(workflow, /needs:\n\s+- quality/);
+    assert.match(workflow, /uses: \.\/\.github\/workflows\/release\.yml/);
+  }
+});
+
+test("Spring pnpm scripts delegate to a cross-platform Gradle runner", async () => {
+  const runner = await readFile(
+    path.join(
+      repositoryRoot,
+      "blueprints",
+      "_common",
+      "spring-gradle",
+      "template",
+      "scripts",
+      "run-gradle.mjs.tpl",
+    ),
+    "utf8",
+  );
+
+  assert.match(runner, /process\.platform === "win32"/);
+  assert.match(runner, /gradlew\.bat/);
+  assert.match(runner, /\.\/gradlew/);
+  assert.match(runner, /systems", "api-server"/);
+  assert.match(runner, /Provide safe Gradle task names or options/);
+
+  for (const blueprintId of ["api-spring", "api-spring-postgres"]) {
+    const packageJson = JSON.parse(
+      await readFile(
+        path.join(
+          repositoryRoot,
+          "blueprints",
+          blueprintId,
+          "template",
+          "package.json.tpl",
+        ),
+        "utf8",
+      ),
+    );
+    assert.match(packageJson.scripts.dev, /run-gradle\.mjs bootRun/);
+    assert.match(packageJson.scripts.test, /run-gradle\.mjs test/);
+    assert.match(packageJson.scripts.check, /run-gradle\.mjs check/);
+    assert.match(packageJson.scripts.build, /run-gradle\.mjs bootJar/);
+  }
+});
+
 test("Bootstrapper and package versions stay synchronized", async () => {
   const packageJson = JSON.parse(
     await readFile(path.join(repositoryRoot, "package.json"), "utf8"),
@@ -145,13 +336,17 @@ test("generated TypeScript build metadata is ignored", async () => {
 });
 
 test("Japanese references do not create nested AGENTS.md instruction files", async () => {
-  const manifest = await readManifest();
-  const targets = manifest.files.map((file) =>
+  const { resolved } = await readResolvedFiles("web-hono");
+  const targets = resolved.map(({ file }) =>
     file.target.replaceAll("\\", "/"),
   );
 
   assert.equal(targets.includes("docs/ja-JP/AGENTS-ja.md"), true);
   assert.equal(targets.includes("docs/ja-JP/DESIGN-ja.md"), true);
+  assert.equal(
+    targets.includes("docs/ja-JP/REPOSITORY_OPERATIONS-ja.md"),
+    true,
+  );
   assert.equal(
     targets.some((target) => target !== "AGENTS.md" && target.endsWith("/AGENTS.md")),
     false,
@@ -227,7 +422,7 @@ test("repository provisioning verifies ruleset details and final branch", async 
   );
 });
 
-test("catalog contains three schema v4 Blueprint manifests", async () => {
+test("catalog contains three schema v5 Blueprint manifests", async () => {
   const blueprintIds = ["web-hono", "api-spring", "api-spring-postgres"];
 
   for (const blueprintId of blueprintIds) {
@@ -243,11 +438,13 @@ test("catalog contains three schema v4 Blueprint manifests", async () => {
       ),
     );
 
-    assert.equal(manifest.schemaVersion, 4);
+    assert.equal(manifest.schemaVersion, 5);
     assert.equal(manifest.id, blueprintId);
     assert.ok(manifest.displayName.length > 0);
     assert.ok(Array.isArray(manifest.projectRequirements));
     assert.ok(Array.isArray(manifest.recommendedCommands));
+    assert.ok(Array.isArray(manifest.fileSets));
+    assert.ok(manifest.fileSets.includes("repository"));
   }
 });
 
@@ -313,7 +510,7 @@ test("api-spring pins the supported build and wrapper security metadata", async 
   assert.match(wrapper, /^validateDistributionUrl=true$/m);
 });
 
-test("api-spring Quality uses JDK 17 without Node or pnpm", async () => {
+test("api-spring Quality uses pnpm to delegate to JDK 17 and Gradle", async () => {
   const workflow = await readFile(
     path.join(
       repositoryRoot,
@@ -329,12 +526,16 @@ test("api-spring Quality uses JDK 17 without Node or pnpm", async () => {
 
   assert.match(workflow, /name: Quality/);
   assert.match(workflow, /java-version: "17"/);
+  assert.match(workflow, /actions\/setup-node@v6/);
+  assert.match(workflow, /pnpm\/action-setup@v4\.4\.0/);
+  assert.match(workflow, /run: pnpm check/);
+  assert.match(workflow, /run: pnpm build/);
   assert.match(workflow, /BASE_REPOSITORY: \$\{\{ github\.repository \}\}/);
   assert.match(
     workflow,
     /HEAD_REPOSITORY: \$\{\{ github\.event\.pull_request\.head\.repo\.full_name \}\}/,
   );
-  assert.doesNotMatch(workflow, /setup-node|pnpm/);
+  assert.match(workflow, /uses: \.\/\.github\/workflows\/release\.yml/);
 });
 
 test("api-spring-postgres provides MyBatis and explicit E2E infrastructure only", async () => {
@@ -435,6 +636,7 @@ test("Spring Blueprint common infrastructure stays byte-identical", async () => 
     ".gitattributes.tpl",
     ".gitignore.tpl",
     ".github/workflows/ci.yml.tpl",
+    "pnpm-lock.yaml.tpl",
     "gradlew",
     "gradlew.bat",
     "gradle/wrapper/gradle-wrapper.jar",

@@ -22,12 +22,12 @@
 品質確認と開発用コマンドは、リポジトリルートからpnpm経由で実行します。
 
 ```powershell
-pnpm run dev
-pnpm run lint
-pnpm run test
-pnpm run typecheck
-pnpm run build
-pnpm run doctor
+pnpm dev
+pnpm test
+pnpm check
+pnpm build
+pnpm doctor
+pnpm release
 ```
 
 ## API規約
@@ -72,9 +72,8 @@ feat: add user search
 
 - 依頼された動作を、無関係な変更を含めず実装している。
 - 変更した動作と重要な失敗経路をテストしている。
-- リポジトリルートで`pnpm run lint`、`pnpm run test`、
-  `pnpm run typecheck`、`pnpm run build`が成功する。
-- 依存関係、コマンド、環境要件を変更した場合、`pnpm run doctor`が成功する。
+- リポジトリルートで`pnpm check`が成功する。
+- 依存関係、コマンド、環境要件を変更した場合、`pnpm doctor`が成功する。
 - コマンド、契約、ワークフローを変更した場合、文書と例を更新している。
 - Secret、ローカル認証情報、ビルド成果物、一時ファイルを追跡していない。
 - 破壊的操作、永続データ変更、互換性破壊、Repository保護の弱体化について、

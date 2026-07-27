@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 5,
+  "id": "spring-gradle",
+  "version": "0.8.0",
+  "displayName": "Spring Gradle task runner",
+  "projectRequirements": [],
+  "recommendedCommands": [],
+  "fileSets": [],
+  "files": [
+    { "kind": "text", "source": "template/scripts/run-gradle.mjs.tpl", "target": "scripts/run-gradle.mjs", "template": false }
+  ]
+}

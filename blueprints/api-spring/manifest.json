@@ -1,16 +1,33 @@
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "id": "api-spring",
   "displayName": "Web API: Spring Boot",
   "version": "0.5.0",
   "projectRequirements": [
+    {
+      "id": "node",
+      "command": "node",
+      "versionArguments": ["--version"],
+      "minimumVersion": "24.10.0",
+      "versionPattern": "v?(\\d+\\.\\d+\\.\\d+)",
+      "category": "repository"
+    },
+    {
+      "id": "pnpm",
+      "command": "pnpm",
+      "versionArguments": ["--version"],
+      "minimumVersion": "11.0.0",
+      "versionPattern": "(\\d+\\.\\d+\\.\\d+)",
+      "category": "repository"
+    },
     {
       "id": "java",
       "command": "java",
       "versionArguments": ["-version"],
       "minimumVersion": "17.0.0",
       "requiredMajor": 17,
-      "versionPattern": "version \"(\\d+\\.\\d+\\.\\d+)"
+      "versionPattern": "version \"(\\d+\\.\\d+\\.\\d+)",
+      "category": "application"
     },
     {
       "id": "javac",
@@ -18,13 +35,16 @@
       "versionArguments": ["-version"],
       "minimumVersion": "17.0.0",
       "requiredMajor": 17,
-      "versionPattern": "(\\d+\\.\\d+\\.\\d+)"
+      "versionPattern": "(\\d+\\.\\d+\\.\\d+)",
+      "category": "application"
     }
   ],
   "recommendedCommands": [
-    { "command": "./gradlew.bat", "arguments": ["check"], "workingDirectory": "systems/api-server" },
-    { "command": "./gradlew.bat", "arguments": ["bootJar"], "workingDirectory": "systems/api-server" }
+    { "command": "pnpm", "arguments": ["install", "--frozen-lockfile"], "workingDirectory": "." },
+    { "command": "pnpm", "arguments": ["check"], "workingDirectory": "." },
+    { "command": "pnpm", "arguments": ["build"], "workingDirectory": "." }
   ],
+  "fileSets": ["repository", "spring-gradle"],
   "files": [
     { "source": "template/.gitattributes.tpl", "target": ".gitattributes", "kind": "text", "template": false },
     { "source": "template/.gitignore.tpl", "target": ".gitignore", "kind": "text", "template": false },
@@ -32,6 +52,8 @@
     { "source": "template/DESIGN.md.tpl", "target": "DESIGN.md", "kind": "text", "template": false },
     { "source": "template/README.md.tpl", "target": "README.md", "kind": "text", "template": true },
     { "source": "template/project.config.yaml.tpl", "target": "project.config.yaml", "kind": "text", "template": true },
+    { "source": "template/package.json.tpl", "target": "package.json", "kind": "text", "template": true },
+    { "source": "template/pnpm-lock.yaml.tpl", "target": "pnpm-lock.yaml", "kind": "text", "template": false },
     { "source": "template/build.gradle.kts.tpl", "target": "systems/api-server/build.gradle.kts", "kind": "text", "template": true },
     { "source": "template/settings.gradle.kts.tpl", "target": "systems/api-server/settings.gradle.kts", "kind": "text", "template": true },
     { "source": "template/gradlew", "target": "systems/api-server/gradlew", "kind": "text", "template": false },

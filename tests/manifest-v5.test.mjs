@@ -22,7 +22,7 @@ const repositoryRoot = path.resolve(
 
 function createManifest(file) {
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     id: "web-hono",
     version: "test",
     displayName: "Manifest test",
@@ -33,6 +33,7 @@ function createManifest(file) {
         versionArguments: ["--version"],
         minimumVersion: "0.0.0",
         versionPattern: "v?(\\d+\\.\\d+\\.\\d+)",
+        category: "repository",
       },
     ],
     recommendedCommands: [
@@ -42,6 +43,7 @@ function createManifest(file) {
         workingDirectory: ".",
       },
     ],
+    fileSets: [],
     files: [file],
   };
 }
@@ -50,8 +52,9 @@ async function runInvalidManifest(
   manifest,
   source = Buffer.from("source\n"),
   basePackage = "net.rukaruka966.manifesttest",
+  fileSetTarget = "common.txt",
 ) {
-  const fixtureRoot = await mkdtemp(path.join(tmpdir(), "ibuki-manifest-v4-"));
+  const fixtureRoot = await mkdtemp(path.join(tmpdir(), "ibuki-manifest-v5-"));
   const blueprintRoot = path.join(fixtureRoot, "blueprints", manifest.id);
   const sourcePath = path.join(blueprintRoot, "template", "source.bin");
   const destination = path.join(fixtureRoot, "destination");
@@ -69,6 +72,46 @@ async function runInvalidManifest(
       "utf8",
     );
     await writeFile(sourcePath, source);
+
+    for (const fileSetId of manifest.fileSets ?? []) {
+      const fileSetRoot = path.join(
+        fixtureRoot,
+        "blueprints",
+        "_common",
+        fileSetId,
+      );
+      await mkdir(path.join(fileSetRoot, "template"), { recursive: true });
+      await writeFile(
+        path.join(fileSetRoot, "manifest.json"),
+        `${JSON.stringify(
+          {
+            schemaVersion: 5,
+            id: fileSetId,
+            version: "test",
+            displayName: "File set fixture",
+            projectRequirements: [],
+            recommendedCommands: [],
+            fileSets: [],
+            files: [
+              {
+                kind: "text",
+                source: "template/common.bin",
+                target: fileSetTarget,
+                template: false,
+              },
+            ],
+          },
+          null,
+          2,
+        )}\n`,
+        "utf8",
+      );
+      await writeFile(
+        path.join(fileSetRoot, "template", "common.bin"),
+        "common\n",
+        "utf8",
+      );
+    }
 
     const args = [
         "-NoProfile",
@@ -113,7 +156,7 @@ async function runValidManifest(
   expectedTarget = "source.txt",
   basePackage = "net.rukaruka966.manifesttest",
 ) {
-  const fixtureRoot = await mkdtemp(path.join(tmpdir(), "ibuki-manifest-v4-ok-"));
+  const fixtureRoot = await mkdtemp(path.join(tmpdir(), "ibuki-manifest-v5-ok-"));
   const blueprintRoot = path.join(fixtureRoot, "blueprints", manifest.id);
   const sourcePath = path.join(blueprintRoot, "template", "source.bin");
   const destination = path.join(fixtureRoot, "destination");
@@ -398,11 +441,11 @@ test("legacy schema is rejected before the destination is created", async () => 
     target: "source.txt",
     template: false,
   });
-  manifest.schemaVersion = 2;
+  manifest.schemaVersion = 4;
 
   assert.match(
     await runInvalidManifest(manifest),
-    /must use schemaVersion 4/,
+    /must use schemaVersion 5/,
   );
 });
 
@@ -421,6 +464,78 @@ test("unknown schema properties are rejected before generation", async () => {
   );
 });
 
+test("project requirements declare a supported category", async () => {
+  const missing = createManifest({
+    kind: "text",
+    source: "template/source.bin",
+    target: "source.txt",
+    template: false,
+  });
+  delete missing.projectRequirements[0].category;
+  assert.match(
+    await runInvalidManifest(missing),
+    /incomplete project requirement declaration/,
+  );
+
+  const unsupported = createManifest({
+    kind: "text",
+    source: "template/source.bin",
+    target: "source.txt",
+    template: false,
+  });
+  unsupported.projectRequirements[0].category = "toolchain";
+  assert.match(
+    await runInvalidManifest(unsupported),
+    /invalid project requirement category/,
+  );
+});
+
+test("file set IDs are safe and unique", async () => {
+  const unsafe = createManifest({
+    kind: "text",
+    source: "template/source.bin",
+    target: "source.txt",
+    template: false,
+  });
+  unsafe.fileSets = ["../repository"];
+  assert.match(
+    await runInvalidManifest(unsafe),
+    /invalid or duplicate file set ID/,
+  );
+
+  const duplicate = createManifest({
+    kind: "text",
+    source: "template/source.bin",
+    target: "source.txt",
+    template: false,
+  });
+  duplicate.fileSets = ["repository", "repository"];
+  assert.match(
+    await runInvalidManifest(duplicate),
+    /invalid or duplicate file set ID/,
+  );
+});
+
+test("file set target collisions fail before destination creation", async () => {
+  const manifest = createManifest({
+    kind: "text",
+    source: "template/source.bin",
+    target: "same.txt",
+    template: false,
+  });
+  manifest.fileSets = ["repository"];
+
+  assert.match(
+    await runInvalidManifest(
+      manifest,
+      Buffer.from("source\n"),
+      "net.rukaruka966.manifesttest",
+      "same.txt",
+    ),
+    /duplicate target/,
+  );
+});
+
 test("schema and argument types are validated without coercion", async () => {
   const stringSchema = createManifest({
     kind: "text",
@@ -428,10 +543,10 @@ test("schema and argument types are validated without coercion", async () => {
     target: "source.txt",
     template: false,
   });
-  stringSchema.schemaVersion = "4";
+  stringSchema.schemaVersion = "5";
   assert.match(
     await runInvalidManifest(stringSchema),
-    /must use schemaVersion 4/,
+    /must use schemaVersion 5/,
   );
 
   const scalarArguments = createManifest({

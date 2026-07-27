@@ -11,16 +11,20 @@ Japanese reference: [`docs/ja-JP/AGENTS-ja.md`](docs/ja-JP/AGENTS-ja.md)
 - Framework: Kotlin and Spring Boot 4.1.0
 - Persistence: PostgreSQL, MyBatis Dynamic SQL, and Flyway
 - Build tool: Gradle Wrapper
+- Package and task runner: pnpm
 
 ## Commands
 
-Run repository quality tasks through the Gradle Wrapper:
+Run repository tasks through pnpm from the repository root. pnpm delegates
+Spring tasks to the checked-in Gradle Wrapper:
 
 ```powershell
-Set-Location ./systems/api-server
-.\gradlew.bat check
-.\gradlew.bat bootJar
-.\gradlew.bat e2eTest
+pnpm dev
+pnpm test
+pnpm check
+pnpm build
+pnpm e2e
+pnpm release
 ```
 
 ## API conventions
@@ -42,7 +46,7 @@ Set-Location ./systems/api-server
 
 ## Definition of Done
 
-- `gradlew.bat check` and `gradlew.bat bootJar` pass.
-- `gradlew.bat e2eTest` passes when E2E tests exist and Docker is available.
+- `pnpm check` and `pnpm build` pass.
+- `pnpm e2e` passes when E2E tests exist and Docker is available.
 - Unknown routes return RFC 7807 Problem Details.
 - Documentation matches changed commands and contracts.

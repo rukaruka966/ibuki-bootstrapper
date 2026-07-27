@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 5,
+  "id": "repository",
+  "version": "0.8.0",
+  "displayName": "Repository common assets",
+  "projectRequirements": [],
+  "recommendedCommands": [],
+  "fileSets": [],
+  "files": [
+    { "kind": "text", "source": "template/.github/workflows/release.yml.tpl", "target": ".github/workflows/release.yml", "template": false },
+    { "kind": "text", "source": "template/docs/REPOSITORY_OPERATIONS.md.tpl", "target": "docs/REPOSITORY_OPERATIONS.md", "template": false },
+    { "kind": "text", "source": "template/docs/ja-JP/REPOSITORY_OPERATIONS-ja.md.tpl", "target": "docs/ja-JP/REPOSITORY_OPERATIONS-ja.md", "template": false },
+    { "kind": "text", "source": "template/release.config.mjs.tpl", "target": "release.config.mjs", "template": false },
+    { "kind": "text", "source": "template/scripts/check-pr-branch-policy.mjs.tpl", "target": "scripts/check-pr-branch-policy.mjs", "template": false },
+    { "kind": "text", "source": "template/tests/release-notes.test.mjs.tpl", "target": "tests/release-notes.test.mjs", "template": false }
+  ]
+}

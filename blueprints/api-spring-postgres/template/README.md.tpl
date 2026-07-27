@@ -8,6 +8,8 @@ Base Packageは`__BASE_PACKAGE__`です。
 
 - Windows 11
 - PowerShell 7
+- Node.js 24.10以降
+- pnpm 11以降
 - 最新のpatchを適用したJDK 17
 
 復元初版の`17.0.1+12`は互換確認値であり、その古いpatchへの固定ではありません。
@@ -19,12 +21,15 @@ Gradleは同梱のWrapperを使用するため、別途インストールする�
 Ibukiはファイル生成だけを行い、以下のコマンドは実行していません。
 
 ```powershell
-Set-Location ./systems/api-server
-.\gradlew.bat bootRun
-.\gradlew.bat check
-.\gradlew.bat bootJar
-.\gradlew.bat e2eTest
+pnpm install --frozen-lockfile
+pnpm dev
+pnpm check
+pnpm build
+pnpm e2e
 ```
+
+pnpmをRepository共通のタスクランナーとして使用し、内部で同梱のGradle Wrapperを
+呼び出します。
 
 ## API
 
@@ -49,3 +54,7 @@ Docker DesktopのLinuxコンテナモードを用意したWindows 11環境で明
 
 `AGENTS.md`をAI Agent向け指示の正本とし、日本語参考版を
 `docs/ja-JP/AGENTS-ja.md`に置きます。
+
+Repository共通の運用方法は
+[`docs/ja-JP/REPOSITORY_OPERATIONS-ja.md`](docs/ja-JP/REPOSITORY_OPERATIONS-ja.md)
+を参照してください。
