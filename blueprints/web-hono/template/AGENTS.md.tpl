@@ -21,12 +21,12 @@ Runnable and deployable units belong directly under `systems/`.
 Run quality and development tasks through pnpm from the repository root:
 
 ```powershell
-pnpm run dev
-pnpm run lint
-pnpm run test
-pnpm run typecheck
-pnpm run build
-pnpm run doctor
+pnpm dev
+pnpm test
+pnpm check
+pnpm build
+pnpm doctor
+pnpm release
 ```
 
 ## API conventions
@@ -72,9 +72,8 @@ A change is complete when all applicable items below are satisfied:
 
 - The requested behavior is implemented without unrelated scope changes.
 - Tests cover changed behavior and important failure paths.
-- `pnpm run lint`, `pnpm run test`, `pnpm run typecheck`, and
-  `pnpm run build` pass from the repository root.
-- `pnpm run doctor` passes when dependencies, commands, or environment
+- `pnpm check` passes from the repository root.
+- `pnpm doctor` passes when dependencies, commands, or environment
   requirements change.
 - Documentation and examples match changed commands, contracts, or workflows.
 - No secrets, local credentials, build output, or temporary files are tracked.

@@ -12,15 +12,20 @@
 - Framework: Kotlin、Spring Boot 4.1.0
 - 永続化: PostgreSQL、MyBatis Dynamic SQL、Flyway
 - Build tool: Gradle Wrapper
+- Package／Task runner: pnpm
 
 ## コマンド
 
 ```powershell
-Set-Location ./systems/api-server
-.\gradlew.bat check
-.\gradlew.bat bootJar
-.\gradlew.bat e2eTest
+pnpm dev
+pnpm test
+pnpm check
+pnpm build
+pnpm e2e
+pnpm release
 ```
+
+Repositoryルートのpnpmから、同梱のGradle Wrapperを呼び出します。
 
 ## API規約
 
@@ -35,12 +40,12 @@ Set-Location ./systems/api-server
 - Endpointの動作と重要な失敗経路をテストする。
 - 明示的な要件なしに業務Model、Mapper、Service、Migration、fixtureを追加しない。
 - Unit TestはDatabaseとDockerへ依存させず、E2EはDocker DesktopのLinux
-  コンテナモードで`e2eTest`を明示実行する。
+  コンテナモードで`pnpm e2e`を明示実行する。
 - Secretやローカル絶対パスを記録しない。
 
 ## 完了条件
 
-- `gradlew.bat check`と`gradlew.bat bootJar`が成功する。
-- E2Eが存在する場合、Dockerを利用できる環境で`gradlew.bat e2eTest`が成功する。
+- `pnpm check`と`pnpm build`が成功する。
+- E2Eが存在する場合、Dockerを利用できる環境で`pnpm e2e`が成功する。
 - 未定義のパスがRFC 7807 Problem Detailsを返す。
 - 文書が変更後のCommandとContractに一致する。

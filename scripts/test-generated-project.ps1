@@ -41,18 +41,36 @@ function Assert-GeneratedBlueprint {
 
     $manifestPath = Join-Path $repositoryRoot "blueprints/$BlueprintId/manifest.json"
     $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+    $contractFiles = [System.Collections.Generic.List[object]]::new()
+
+    foreach ($file in @($manifest.files)) {
+        $contractFiles.Add($file)
+    }
+
+    foreach ($fileSetId in @($manifest.fileSets)) {
+        $fileSetPath = Join-Path $repositoryRoot (
+            "blueprints/_common/$fileSetId/manifest.json"
+        )
+        $fileSetManifest = Get-Content -LiteralPath $fileSetPath -Raw |
+            ConvertFrom-Json
+
+        foreach ($file in @($fileSetManifest.files)) {
+            $contractFiles.Add($file)
+        }
+    }
+
     $generatedFiles = @(
         Get-ChildItem -LiteralPath $Destination -Recurse -File
     )
 
-    if ($generatedFiles.Count -ne @($manifest.files).Count) {
+    if ($generatedFiles.Count -ne $contractFiles.Count) {
         throw (
             "Generated file count differs from the manifest for '$BlueprintId': " +
-            "$($generatedFiles.Count) != $(@($manifest.files).Count)"
+            "$($generatedFiles.Count) != $($contractFiles.Count)"
         )
     }
 
-    foreach ($file in @($manifest.files)) {
+    foreach ($file in @($contractFiles)) {
         $relativeTarget = [string]$file.target
 
         if (

@@ -176,7 +176,7 @@ test("interactive wizard returns from unavailable choices and cancels safely", a
     assert.match(output, /Unknown selection 'invalid'/);
     assert.match(output, /Blueprint ID\s+: web-hono/);
     assert.match(output, /GitHub\s+: skipped/);
-    assert.match(output, /pnpm run typecheck/);
+    assert.match(output, /pnpm check/);
     assert.match(output, /Cancelled\./);
     await assert.rejects(access(destination));
   } finally {
@@ -262,6 +262,14 @@ test("api-spring generation does not inspect JDK and repeats unexecuted checks a
     assert.match(output, /Project created successfully\./);
     assert.match(
       output,
+      /Repository operation requirements \(not checked by Ibuki\):[\s\S]*node\s+: >= 24\.10\.0[\s\S]*pnpm\s+: >= 11\.0\.0/,
+    );
+    assert.match(
+      output,
+      /Application development requirements \(not checked by Ibuki\):[\s\S]*java\s+: major version 17 required/,
+    );
+    assert.match(
+      output,
       /java\s+: major version 17 required \(minimum 17\.0\.0\)/,
     );
     assert.match(
@@ -272,8 +280,9 @@ test("api-spring generation does not inspect JDK and repeats unexecuted checks a
     assert.match(output, /Next\s+: Set-Location -LiteralPath/);
     assert.match(output, /Project-owned checks below were not run by Ibuki:/);
     assert.match(output, /Base package\s+: net\.rukaruka966\.javahometest/);
-    assert.match(output, /\[systems\/api-server\] \.\/gradlew\.bat check/);
-    assert.match(output, /\[systems\/api-server\] \.\/gradlew\.bat bootJar/);
+    assert.match(output, /\[\.\] pnpm install --frozen-lockfile/);
+    assert.match(output, /\[\.\] pnpm check/);
+    assert.match(output, /\[\.\] pnpm build/);
     await access(path.join(destination, "systems", "api-server", "build.gradle.kts"));
   } finally {
     await rm(workingDirectory, { recursive: true, force: true });
@@ -720,24 +729,30 @@ test("only PowerShell is enforced while project requirements are informational",
   );
   assert.doesNotMatch(bootstrap, /-FilePath \$step\.command/);
   assert.deepEqual(
-    webManifest.projectRequirements.map(({ id, minimumVersion }) => [
+    webManifest.projectRequirements.map(({ id, minimumVersion, category }) => [
       id,
       minimumVersion,
+      category,
     ]),
     [
-      ["node", "24.10.0"],
-      ["pnpm", "11.0.0"],
+      ["node", "24.10.0", "repository"],
+      ["pnpm", "11.0.0", "repository"],
     ],
   );
   assert.deepEqual(
-    springManifest.projectRequirements.map(({ id, minimumVersion, requiredMajor }) => [
-      id,
-      minimumVersion,
-      requiredMajor,
-    ]),
+    springManifest.projectRequirements.map(
+      ({ id, minimumVersion, requiredMajor, category }) => [
+        id,
+        minimumVersion,
+        requiredMajor,
+        category,
+      ],
+    ),
     [
-      ["java", "17.0.0", 17],
-      ["javac", "17.0.0", 17],
+      ["node", "24.10.0", undefined, "repository"],
+      ["pnpm", "11.0.0", undefined, "repository"],
+      ["java", "17.0.0", 17, "application"],
+      ["javac", "17.0.0", 17, "application"],
     ],
   );
 });
