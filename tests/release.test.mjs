@@ -14,6 +14,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { analyzeCommits } from "@semantic-release/commit-analyzer";
+import { generateNotes } from "@semantic-release/release-notes-generator";
 import releaseConfig from "../release.config.mjs";
 
 const repositoryRoot = path.resolve(
@@ -391,6 +392,51 @@ test("Conventional Commits produce the expected release types", async () => {
     ),
     "major",
   );
+});
+
+test("Conventional Commits produce feature and bug fix release notes", async () => {
+  const packageJson = JSON.parse(
+    await readFile(path.join(repositoryRoot, "package.json"), "utf8"),
+  );
+  assert.equal(
+    packageJson.devDependencies["conventional-changelog-conventionalcommits"],
+    "9.3.1",
+  );
+
+  const notes = await generateNotes(
+    getPluginConfiguration("@semantic-release/release-notes-generator"),
+    {
+      commits: [
+        {
+          hash: "1234567890abcdef",
+          message: "feat: add PostgreSQL Blueprint",
+        },
+        {
+          hash: "abcdef1234567890",
+          message: "fix: handle Windows device names",
+        },
+      ],
+      cwd: repositoryRoot,
+      lastRelease: {
+        gitTag: "v0.6.0",
+        version: "0.6.0",
+      },
+      nextRelease: {
+        gitTag: "v0.7.0",
+        version: "0.7.0",
+      },
+      options: {
+        repositoryUrl:
+          "https://github.com/rukaruka966/ibuki-bootstrapper.git",
+      },
+      logger: silentLogger,
+    },
+  );
+
+  assert.match(notes, /### Features/);
+  assert.match(notes, /add PostgreSQL Blueprint/);
+  assert.match(notes, /### Bug Fixes/);
+  assert.match(notes, /handle Windows device names/);
 });
 
 test("release analysis reads feature commits through a real no-ff merge", async () => {
