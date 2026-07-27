@@ -346,13 +346,21 @@ test("Base Package validation is conditional on Spring Blueprints", async () => 
   }
 });
 
-test("reserved-word Project IDs produce safe deterministic default Base Packages", async () => {
+test("normalized Project IDs produce safe deterministic default Base Packages", async () => {
   const workingDirectory = await mkdtemp(
     path.join(tmpdir(), "ibuki-reserved-package-test-"),
   );
 
   try {
-    for (const projectId of ["class", "object", "when", "data"]) {
+    for (const [projectId, normalizedSegment] of [
+      ["class", "classapp"],
+      ["object", "objectapp"],
+      ["when", "whenapp"],
+      ["data", "dataapp"],
+      ["co-n", "conapp"],
+      ["co-m1", "com1app"],
+      ["lp-t1", "lpt1app"],
+    ]) {
       const destination = path.join(workingDirectory, projectId);
       const result = spawnSync(
         "pwsh",
@@ -373,7 +381,7 @@ test("reserved-word Project IDs produce safe deterministic default Base Packages
         { cwd: workingDirectory, encoding: "utf8", timeout: 30_000 },
       );
       const output = `${result.stdout}\n${result.stderr}`;
-      const expectedPackage = `net.rukaruka966.${projectId}app`;
+      const expectedPackage = `net.rukaruka966.${normalizedSegment}`;
 
       assert.equal(result.status, 0, output);
       assert.match(
