@@ -1,8 +1,8 @@
 {
   "schemaVersion": 4,
-  "id": "api-spring",
-  "displayName": "Web API: Spring Boot",
-  "version": "0.5.0",
+  "id": "api-spring-postgres",
+  "displayName": "Web API: Spring Boot + PostgreSQL",
+  "version": "0.7.0",
   "projectRequirements": [
     {
       "id": "java",
@@ -23,7 +23,8 @@
   ],
   "recommendedCommands": [
     { "command": "./gradlew.bat", "arguments": ["check"], "workingDirectory": "systems/api-server" },
-    { "command": "./gradlew.bat", "arguments": ["bootJar"], "workingDirectory": "systems/api-server" }
+    { "command": "./gradlew.bat", "arguments": ["bootJar"], "workingDirectory": "systems/api-server" },
+    { "command": "./gradlew.bat", "arguments": ["e2eTest"], "workingDirectory": "systems/api-server" }
   ],
   "files": [
     { "source": "template/.gitattributes.tpl", "target": ".gitattributes", "kind": "text", "template": false },
@@ -50,7 +51,14 @@
     { "source": "template/src/main/kotlin/com/example/application/Application.kt.tpl", "target": "systems/api-server/src/main/kotlin/__BASE_PACKAGE_PATH__/Application.kt", "kind": "text", "template": true, "targetTemplate": true },
     { "source": "template/src/main/kotlin/com/example/application/HealthController.kt.tpl", "target": "systems/api-server/src/main/kotlin/__BASE_PACKAGE_PATH__/HealthController.kt", "kind": "text", "template": true, "targetTemplate": true },
     { "source": "template/src/main/kotlin/com/example/application/ApiExceptionHandler.kt.tpl", "target": "systems/api-server/src/main/kotlin/__BASE_PACKAGE_PATH__/ApiExceptionHandler.kt", "kind": "text", "template": true, "targetTemplate": true },
-    { "source": "template/src/main/resources/application.yaml.tpl", "target": "systems/api-server/src/main/resources/application.yaml", "kind": "text", "template": false },
-    { "source": "template/src/test/kotlin/com/example/application/ApiApplicationTests.kt.tpl", "target": "systems/api-server/src/test/kotlin/__BASE_PACKAGE_PATH__/ApiApplicationTests.kt", "kind": "text", "template": true, "targetTemplate": true }
+    { "source": "template/src/main/resources/application.yml.tpl", "target": "systems/api-server/src/main/resources/application.yml", "kind": "text", "template": false },
+    { "source": "template/src/test/kotlin/com/example/application/ApiApplicationTests.kt.tpl", "target": "systems/api-server/src/test/kotlin/__BASE_PACKAGE_PATH__/ApiApplicationTests.kt", "kind": "text", "template": true, "targetTemplate": true },
+    { "source": "template/empty.gitkeep", "target": "systems/api-server/src/main/kotlin/__BASE_PACKAGE_PATH__/controller/.gitkeep", "kind": "text", "template": false, "targetTemplate": true },
+    { "source": "template/empty.gitkeep", "target": "systems/api-server/src/main/kotlin/__BASE_PACKAGE_PATH__/service/.gitkeep", "kind": "text", "template": false, "targetTemplate": true },
+    { "source": "template/empty.gitkeep", "target": "systems/api-server/src/main/kotlin/__BASE_PACKAGE_PATH__/model/.gitkeep", "kind": "text", "template": false, "targetTemplate": true },
+    { "source": "template/empty.gitkeep", "target": "systems/api-server/src/main/kotlin/__BASE_PACKAGE_PATH__/mapper/.gitkeep", "kind": "text", "template": false, "targetTemplate": true },
+    { "source": "template/empty.gitkeep", "target": "systems/api-server/src/main/resources/db/migration/.gitkeep", "kind": "text", "template": false },
+    { "source": "template/empty.gitkeep", "target": "systems/api-server/src/e2eTest/kotlin/__BASE_PACKAGE_PATH__/.gitkeep", "kind": "text", "template": false, "targetTemplate": true },
+    { "source": "template/empty.gitkeep", "target": "systems/api-server/src/e2eTest/resources/db/migration/.gitkeep", "kind": "text", "template": false }
   ]
 }

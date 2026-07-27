@@ -34,6 +34,7 @@ GitHub Repositoryも作成する場合だけ、次を追加で使用します。
 | --- | --- |
 | `web-hono` | Node.js 24.10.0以降、pnpm 11以降 |
 | `api-spring` | `java`と`javac`を含むJDK 17 |
+| `api-spring-postgres` | JDK 17。E2Eを明示実行する場合だけDocker Desktop |
 
 `api-spring`ではNode.jsとpnpmを生成要件にしません。JDK 17.0.1+12でも互換確認を
 行いますが、通常は最新のセキュリティ更新が適用されたJDK 17を使用してください。
@@ -47,9 +48,9 @@ GitHub Repositoryも作成する場合だけ、次を追加で使用します。
 irm https://raw.githubusercontent.com/rukaruka966/ibuki-bootstrapper/main/bootstrap.ps1 | iex
 ```
 
-現時点で生成できる構成は、`web-hono`（React + Hono）と
-`api-spring`（Kotlin + Spring Boot Web API）です。React + Hono +
-Spring Boot、Android、Windows Desktopは選択肢に表示されますが、
+現時点で生成できる構成は、`web-hono`、`api-spring`、
+`api-spring-postgres`です。React + Hono + Spring Boot、Android、
+Windows Desktopは選択肢に表示されますが、
 `Coming soon`として生成せず構成選択へ戻ります。
 
 公開スクリプトには認証情報を含みません。Privateリポジトリを作成する場合だけ、
@@ -83,11 +84,22 @@ pwsh ./bootstrap.ps1 `
   -Blueprint api-spring `
   -ProjectId sample-api `
   -DisplayName "Sample API" `
+  -BasePackage net.rukaruka966.sampleapi `
   -Destination ./sample-api `
   -SkipGitHub `
   -NonInteractive `
   -Yes
 ```
+
+`-BasePackage`を省略した場合はProject IDからハイフンを除去し、
+`net.rukaruka966.<project-id>`へ正規化します。たとえば`media-node`は
+`net.rukaruka966.medianode`になります。正規化後の末尾segmentがJava／Kotlinの
+予約語になる場合は`app`を付加します。たとえば`class`は
+`net.rukaruka966.classapp`になります。
+Project IDと明示入力するBase Packageの各segmentには、`con`、`com1`、
+`lpt1`などのWindows device名を使用できません。
+
+PostgreSQL・MyBatis・Flyway構成では`-Blueprint api-spring-postgres`を指定します。
 
 非対話実行でも、引数は対話ウィザードと同じ共通設定へ変換・検証されます。
 既存のコマンドとの互換性のため、`-Blueprint`を省略した場合は`web-hono`です。
@@ -121,6 +133,16 @@ Windows上の各種開発ツールとの互換性を保つため、正規化後�
 - JDK 17を使用するGitHub Actions `Quality`
 - `AGENTS.md`・`DESIGN.md`と日本語参考版
 - `project.config.yaml`への構成・port・Bootstrapper version記録
+
+`api-spring-postgres`:
+
+- `api-spring`と同じ中立的なWeb API基盤
+- PostgreSQL JDBC Driver、MyBatis Spring Boot Starter、MyBatis Dynamic SQL
+- Flyway CoreとPostgreSQL対応module
+- DatabaseやDockerへ依存しないUnit Test
+- `check`へ接続しない明示実行の`e2eTest` SourceSetとTestcontainers依存関係
+- 業務Model、Mapper、Service、Migration、fixtureを含まない空Scaffold
+- `DB_URL`、`DB_USERNAME`、`DB_PASSWORD`による接続設定
 
 Node.js、pnpm、JDKは生成されたプロジェクトを開発するための要件であり、Ibukiが
 ローカルファイルだけを生成する際の前提ではありません。GitHub Repositoryも作成する
@@ -170,8 +192,8 @@ GitHub Releasesへの案内板です。
 
 次の構成・機能は現時点では生成しません。
 
-- PostgreSQL・Redis
-- Docker
+- Redis
+- Docker／Composeによるアプリ実行環境
 - Web: React + Hono + Spring Boot
 - Android: Jetpack Compose
 - Windows Desktop: Compose Multiplatform

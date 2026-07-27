@@ -67,6 +67,8 @@ test("template files use only supported tokens", async () => {
     "__PROJECT_DISPLAY_NAME_HTML__",
     "__PROJECT_DISPLAY_NAME_JSON__",
     "__PROJECT_DISPLAY_NAME_YAML__",
+    "__BASE_PACKAGE__",
+    "__BASE_PACKAGE_PATH__",
   ]);
 
   for (const file of manifest.files) {
@@ -225,8 +227,8 @@ test("repository provisioning verifies ruleset details and final branch", async 
   );
 });
 
-test("catalog contains two schema v3 Blueprint manifests", async () => {
-  const blueprintIds = ["web-hono", "api-spring"];
+test("catalog contains three schema v4 Blueprint manifests", async () => {
+  const blueprintIds = ["web-hono", "api-spring", "api-spring-postgres"];
 
   for (const blueprintId of blueprintIds) {
     const manifest = JSON.parse(
@@ -241,7 +243,7 @@ test("catalog contains two schema v3 Blueprint manifests", async () => {
       ),
     );
 
-    assert.equal(manifest.schemaVersion, 3);
+    assert.equal(manifest.schemaVersion, 4);
     assert.equal(manifest.id, blueprintId);
     assert.ok(manifest.displayName.length > 0);
     assert.ok(Array.isArray(manifest.projectRequirements));
@@ -333,6 +335,121 @@ test("api-spring Quality uses JDK 17 without Node or pnpm", async () => {
     /HEAD_REPOSITORY: \$\{\{ github\.event\.pull_request\.head\.repo\.full_name \}\}/,
   );
   assert.doesNotMatch(workflow, /setup-node|pnpm/);
+});
+
+test("api-spring-postgres provides MyBatis and explicit E2E infrastructure only", async () => {
+  const postgresRoot = path.join(
+    repositoryRoot,
+    "blueprints",
+    "api-spring-postgres",
+  );
+  const manifest = JSON.parse(
+    await readFile(path.join(postgresRoot, "manifest.json"), "utf8"),
+  );
+  const build = await readFile(
+    path.join(postgresRoot, "template", "build.gradle.kts.tpl"),
+    "utf8",
+  );
+  const unitTest = await readFile(
+    path.join(
+      postgresRoot,
+      "template",
+      "src",
+      "test",
+      "kotlin",
+      "com",
+      "example",
+      "application",
+      "ApiApplicationTests.kt.tpl",
+    ),
+    "utf8",
+  );
+  const applicationConfig = await readFile(
+    path.join(
+      postgresRoot,
+      "template",
+      "src",
+      "main",
+      "resources",
+      "application.yml.tpl",
+    ),
+    "utf8",
+  );
+
+  assert.equal(manifest.version, "0.7.0");
+  assert.match(
+    build,
+    /mybatis-spring-boot-starter:4\.0\.1/,
+  );
+  assert.match(build, /mybatis-dynamic-sql:2\.0\.0/);
+  assert.match(build, /org\.flywaydb:flyway-core/);
+  assert.match(build, /org\.flywaydb:flyway-database-postgresql/);
+  assert.match(build, /runtimeOnly\("org\.postgresql:postgresql"\)/);
+  assert.match(build, /testcontainers-bom:2\.0\.5/);
+  assert.match(build, /testcontainers-postgresql/);
+  assert.match(build, /testcontainers-junit-jupiter/);
+  assert.match(build, /sourceSets\.create\("e2eTest"\)/);
+  assert.match(build, /tasks\.register<Test>\("e2eTest"\)/);
+  assert.doesNotMatch(build, /spring-boot-starter-data-jpa/);
+  assert.doesNotMatch(build, /dependsOn.*e2eTest|e2eTest.*dependsOn/s);
+  assert.doesNotMatch(unitTest, /SpringBootTest|Testcontainers|PostgreSQL/);
+  assert.match(
+    applicationConfig,
+    /url: \$\{DB_URL:jdbc:postgresql:\/\/localhost:5432\/app\}/,
+  );
+  assert.match(applicationConfig, /username: \$\{DB_USERNAME:postgres\}/);
+  assert.match(applicationConfig, /password: \$\{DB_PASSWORD:\}/);
+  assert.match(applicationConfig, /locations: classpath:db\/migration/);
+  assert.match(applicationConfig, /map-underscore-to-camel-case: true/);
+
+  const targets = manifest.files.map((file) => file.target);
+  assert.equal(
+    targets.some((target) => target.includes("/src/test/") && target.endsWith("/.gitkeep")),
+    false,
+    "src/test contains a real unit test and must not include .gitkeep",
+  );
+
+  for (const expectedTarget of [
+    "systems/api-server/src/main/kotlin/__BASE_PACKAGE_PATH__/controller/.gitkeep",
+    "systems/api-server/src/main/kotlin/__BASE_PACKAGE_PATH__/service/.gitkeep",
+    "systems/api-server/src/main/kotlin/__BASE_PACKAGE_PATH__/model/.gitkeep",
+    "systems/api-server/src/main/kotlin/__BASE_PACKAGE_PATH__/mapper/.gitkeep",
+    "systems/api-server/src/main/resources/db/migration/.gitkeep",
+    "systems/api-server/src/e2eTest/kotlin/__BASE_PACKAGE_PATH__/.gitkeep",
+    "systems/api-server/src/e2eTest/resources/db/migration/.gitkeep",
+  ]) {
+    assert.ok(targets.includes(expectedTarget), expectedTarget);
+  }
+});
+
+test("Spring Blueprint common infrastructure stays byte-identical", async () => {
+  const plainRoot = path.join(repositoryRoot, "blueprints", "api-spring", "template");
+  const postgresRoot = path.join(
+    repositoryRoot,
+    "blueprints",
+    "api-spring-postgres",
+    "template",
+  );
+
+  for (const relativePath of [
+    ".gitattributes.tpl",
+    ".gitignore.tpl",
+    ".github/workflows/ci.yml.tpl",
+    "gradlew",
+    "gradlew.bat",
+    "gradle/wrapper/gradle-wrapper.jar",
+    "gradle/wrapper/gradle-wrapper.properties.tpl",
+    "settings.gradle.kts.tpl",
+    "src/main/kotlin/com/example/application/Application.kt.tpl",
+    "src/main/kotlin/com/example/application/HealthController.kt.tpl",
+    "src/main/kotlin/com/example/application/ApiExceptionHandler.kt.tpl",
+  ]) {
+    assert.deepEqual(
+      await readFile(path.join(postgresRoot, relativePath)),
+      await readFile(path.join(plainRoot, relativePath)),
+      relativePath,
+    );
+  }
 });
 
 test("binary source pipeline validates all assets before destination creation", async () => {

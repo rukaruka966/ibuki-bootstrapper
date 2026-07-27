@@ -9,6 +9,7 @@ Japanese reference: [`docs/ja-JP/AGENTS-ja.md`](docs/ja-JP/AGENTS-ja.md)
 - Base package: `__BASE_PACKAGE__`
 - Runtime: JDK 17
 - Framework: Kotlin and Spring Boot 4.1.0
+- Persistence: PostgreSQL, MyBatis Dynamic SQL, and Flyway
 - Build tool: Gradle Wrapper
 
 ## Commands
@@ -19,6 +20,7 @@ Run repository quality tasks through the Gradle Wrapper:
 Set-Location ./systems/api-server
 .\gradlew.bat check
 .\gradlew.bat bootJar
+.\gradlew.bat e2eTest
 ```
 
 ## API conventions
@@ -32,12 +34,15 @@ Set-Location ./systems/api-server
 - Keep the application compatible with JDK 17.
 - Keep text UTF-8 without BOM and use LF line endings.
 - Add tests for endpoint behavior and important failure paths.
-- Do not add databases, authentication, Docker, or OpenAPI without an explicit
-  requirement.
+- Keep business models, mappers, services, migrations, and fixtures out of the
+  scaffold until an explicit requirement exists.
+- Keep Unit Tests independent from Database and Docker. Run `e2eTest` explicitly
+  with Docker Desktop in Linux container mode.
 - Never write secrets or local absolute paths.
 
 ## Definition of Done
 
 - `gradlew.bat check` and `gradlew.bat bootJar` pass.
+- `gradlew.bat e2eTest` passes when E2E tests exist and Docker is available.
 - Unknown routes return RFC 7807 Problem Details.
 - Documentation matches changed commands and contracts.

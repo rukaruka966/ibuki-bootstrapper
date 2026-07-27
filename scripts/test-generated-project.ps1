@@ -19,6 +19,8 @@ function Assert-GeneratedBlueprint {
         [Parameter(Mandatory)]
         [string]$ProjectId,
 
+        [string]$BasePackage = "",
+
         [Parameter(Mandatory)]
         [string]$Destination
     )
@@ -27,6 +29,7 @@ function Assert-GeneratedBlueprint {
         -Blueprint $BlueprintId `
         -ProjectId $ProjectId `
         -DisplayName 'Ibuki "Contract" <Project>' `
+        -BasePackage $BasePackage `
         -Destination $Destination `
         -SkipGitHub `
         -NonInteractive `
@@ -50,7 +53,20 @@ function Assert-GeneratedBlueprint {
     }
 
     foreach ($file in @($manifest.files)) {
-        $target = Join-Path $Destination $file.target
+        $relativeTarget = [string]$file.target
+
+        if (
+            @($file.PSObject.Properties.Name) -contains "targetTemplate" -and
+            $file.targetTemplate
+        ) {
+            $basePackagePath = $BasePackage.Replace(".", "/")
+            $relativeTarget = $relativeTarget.Replace(
+                "__BASE_PACKAGE_PATH__",
+                $basePackagePath
+            )
+        }
+
+        $target = Join-Path $Destination $relativeTarget
         $destinationRoot = [System.IO.Path]::GetFullPath($Destination).TrimEnd(
             [System.IO.Path]::DirectorySeparatorChar
         )
@@ -169,7 +185,13 @@ try {
     Assert-GeneratedBlueprint `
         -BlueprintId "api-spring" `
         -ProjectId "contract-api" `
+        -BasePackage "net.rukaruka966.contractapi" `
         -Destination (Join-Path $testRoot "api")
+    Assert-GeneratedBlueprint `
+        -BlueprintId "api-spring-postgres" `
+        -ProjectId "contract-postgres" `
+        -BasePackage "net.rukaruka966.contractpostgres" `
+        -Destination (Join-Path $testRoot "pg")
     Assert-NoOverwriteContract -Destination (Join-Path $testRoot "existing")
     Write-Host "Generated project contract test passed." -ForegroundColor Green
 } finally {
