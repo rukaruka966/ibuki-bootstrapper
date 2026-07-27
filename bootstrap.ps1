@@ -573,7 +573,10 @@ function Resolve-BootstrapConfiguration {
         if ([string]::IsNullOrWhiteSpace($resolvedBasePackage)) {
             $normalizedProjectId = $resolvedProjectId.Replace("-", "").ToLowerInvariant()
 
-            if ((Get-JavaKotlinReservedWords) -contains $normalizedProjectId) {
+            if (
+                (Get-JavaKotlinReservedWords) -contains $normalizedProjectId -or
+                (Test-WindowsDeviceName -Value $normalizedProjectId)
+            ) {
                 $normalizedProjectId = "${normalizedProjectId}app"
             }
 

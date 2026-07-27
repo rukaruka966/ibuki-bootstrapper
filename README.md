@@ -94,8 +94,8 @@ pwsh ./bootstrap.ps1 `
 `-BasePackage`を省略した場合はProject IDからハイフンを除去し、
 `net.rukaruka966.<project-id>`へ正規化します。たとえば`media-node`は
 `net.rukaruka966.medianode`になります。正規化後の末尾segmentがJava／Kotlinの
-予約語になる場合は`app`を付加します。たとえば`class`は
-`net.rukaruka966.classapp`になります。
+予約語またはWindows device名になる場合は`app`を付加します。たとえば`class`は
+`net.rukaruka966.classapp`、`co-n`は`net.rukaruka966.conapp`になります。
 Project IDと明示入力するBase Packageの各segmentには、`con`、`com1`、
 `lpt1`などのWindows device名を使用できません。
 
