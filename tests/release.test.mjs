@@ -172,7 +172,7 @@ test("standalone generation succeeds without a previous release tag", async () =
       path.join(blueprintRoot, "manifest.json"),
       `${JSON.stringify(
         {
-          schemaVersion: 3,
+          schemaVersion: 4,
           id: "web-hono",
           version: "0.0.0",
           displayName: "No Tag Test",

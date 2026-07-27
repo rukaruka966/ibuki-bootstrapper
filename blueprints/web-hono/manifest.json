@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "id": "web-hono",
   "version": "0.2.0",
   "displayName": "Web: React + Hono",

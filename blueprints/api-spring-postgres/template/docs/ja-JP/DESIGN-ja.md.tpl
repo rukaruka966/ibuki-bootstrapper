@@ -9,9 +9,12 @@
 - Application内部のEndpointには`/internal/**`を使用する。
 - 将来外部公開するAPIには`/api/v1/**`を使用する。
 - ErrorはRFC 7807 Problem Detailsで返す。
-- Starterでは永続化方式と認証方式を決めない。
+- PostgreSQLをMyBatisから利用し、Schema migrationをFlywayで管理する。
+- 架空の業務Model、Mapper、Service、Migration、fixtureを追加しない。
 
 ## 運用
 
 - `/internal/health`を高速かつ任意のInfrastructureに依存させない。
 - 実行可能なSpring Boot JARを1つ生成する。
+- Unit TestはDatabaseとDockerへ依存させない。
+- `e2eTest`は明示実行し、`check`へ接続しない。

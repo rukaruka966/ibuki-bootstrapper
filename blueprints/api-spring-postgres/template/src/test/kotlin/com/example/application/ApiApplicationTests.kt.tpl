@@ -5,7 +5,6 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.get
@@ -39,12 +38,5 @@ class ApiApplicationTests {
         assertEquals("about:blank", problem.type.toString())
         assertEquals("Not Found", problem.title)
         assertEquals("/missing", problem.instance.toString())
-    }
-}
-
-@SpringBootTest
-class ApplicationContextTests {
-    @Test
-    fun `application context loads`() {
     }
 }

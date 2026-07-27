@@ -32,77 +32,108 @@ async function readTreeBytes(root, relative = "") {
   return files;
 }
 
-test("interactive and non-interactive generation produce identical bytes", async () => {
-  const workingDirectory = await mkdtemp(
-    path.join(tmpdir(), "ibuki-mode-parity-"),
-  );
-  const interactiveDestination = path.join(workingDirectory, "mode-parity");
-  const nonInteractiveDestination = path.join(workingDirectory, "noninteractive");
-  const projectId = "mode-parity";
-  const displayName = "Mode parity __PROJECT_ID__";
-
-  try {
-    const interactive = spawnSync(
-      "pwsh",
-      ["-NoProfile", "-File", bootstrapPath],
-      {
-        cwd: workingDirectory,
-        encoding: "utf8",
-        input: [
-          "1",
-          projectId,
-          displayName,
-          "1",
-          "n",
-          "y",
-          "",
-        ].join("\n"),
-        timeout: 30_000,
-      },
+for (const configuration of [
+  { blueprint: "web-hono", menuChoice: "1" },
+  {
+    blueprint: "api-spring",
+    menuChoice: "3",
+    basePackage: "net.rukaruka966.modeparity",
+  },
+  {
+    blueprint: "api-spring-postgres",
+    menuChoice: "4",
+    basePackage: "net.rukaruka966.modeparity",
+  },
+]) {
+  test(`${configuration.blueprint}: interactive and non-interactive generation produce identical paths and bytes`, async () => {
+    const workingDirectory = await mkdtemp(
+      path.join(tmpdir(), "ibuki-mode-parity-"),
     );
-    const nonInteractive = spawnSync(
-      "pwsh",
-      [
+    const projectId = "mode-parity";
+    const interactiveDestination = path.join(workingDirectory, projectId);
+    const nonInteractiveDestination = path.join(
+      workingDirectory,
+      "noninteractive",
+    );
+    const displayName = "Mode parity __PROJECT_ID__";
+
+    try {
+      const interactiveInput = [
+        configuration.menuChoice,
+        projectId,
+        displayName,
+      ];
+      if (configuration.basePackage) {
+        interactiveInput.push(configuration.basePackage);
+      }
+      interactiveInput.push("1", "n", "y", "");
+
+      const interactive = spawnSync(
+        "pwsh",
+        ["-NoProfile", "-File", bootstrapPath],
+        {
+          cwd: workingDirectory,
+          encoding: "utf8",
+          input: interactiveInput.join("\n"),
+          timeout: 30_000,
+        },
+      );
+      const nonInteractiveArguments = [
         "-NoProfile",
         "-File",
         bootstrapPath,
         "-Blueprint",
-        "web-hono",
+        configuration.blueprint,
         "-ProjectId",
         projectId,
         "-DisplayName",
         displayName,
+      ];
+      if (configuration.basePackage) {
+        nonInteractiveArguments.push(
+          "-BasePackage",
+          configuration.basePackage,
+        );
+      }
+      nonInteractiveArguments.push(
         "-Destination",
         nonInteractiveDestination,
         "-SkipGitHub",
         "-NonInteractive",
         "-Yes",
-      ],
-      { cwd: workingDirectory, encoding: "utf8", timeout: 30_000 },
-    );
+      );
+      const nonInteractive = spawnSync("pwsh", nonInteractiveArguments, {
+        cwd: workingDirectory,
+        encoding: "utf8",
+        timeout: 30_000,
+      });
 
-    assert.equal(
-      interactive.status,
-      0,
-      `${interactive.stdout}\n${interactive.stderr}`,
-    );
-    assert.equal(
-      nonInteractive.status,
-      0,
-      `${nonInteractive.stdout}\n${nonInteractive.stderr}`,
-    );
+      assert.equal(
+        interactive.status,
+        0,
+        `${interactive.stdout}\n${interactive.stderr}`,
+      );
+      assert.equal(
+        nonInteractive.status,
+        0,
+        `${nonInteractive.stdout}\n${nonInteractive.stderr}`,
+      );
 
-    const interactiveTree = await readTreeBytes(interactiveDestination);
-    const nonInteractiveTree = await readTreeBytes(nonInteractiveDestination);
-    assert.deepEqual([...interactiveTree.keys()], [...nonInteractiveTree.keys()]);
+      const interactiveTree = await readTreeBytes(interactiveDestination);
+      const nonInteractiveTree = await readTreeBytes(nonInteractiveDestination);
+      assert.deepEqual(
+        [...interactiveTree.keys()],
+        [...nonInteractiveTree.keys()],
+      );
 
-    for (const [name, bytes] of interactiveTree) {
-      assert.deepEqual(bytes, nonInteractiveTree.get(name), name);
+      for (const [name, bytes] of interactiveTree) {
+        assert.deepEqual(bytes, nonInteractiveTree.get(name), name);
+      }
+    } finally {
+      await rm(workingDirectory, { recursive: true, force: true });
     }
-  } finally {
-    await rm(workingDirectory, { recursive: true, force: true });
-  }
-});
+  });
+}
 
 test("interactive wizard returns from unavailable choices and cancels safely", async () => {
   const workingDirectory = await mkdtemp(
@@ -240,9 +271,200 @@ test("api-spring generation does not inspect JDK and repeats unexecuted checks a
     assert.doesNotMatch(output, /java\s+: >= 17\.0\.0/);
     assert.match(output, /Next\s+: Set-Location -LiteralPath/);
     assert.match(output, /Project-owned checks below were not run by Ibuki:/);
+    assert.match(output, /Base package\s+: net\.rukaruka966\.javahometest/);
     assert.match(output, /\[systems\/api-server\] \.\/gradlew\.bat check/);
     assert.match(output, /\[systems\/api-server\] \.\/gradlew\.bat bootJar/);
     await access(path.join(destination, "systems", "api-server", "build.gradle.kts"));
+  } finally {
+    await rm(workingDirectory, { recursive: true, force: true });
+  }
+});
+
+test("Base Package validation is conditional on Spring Blueprints", async () => {
+  const workingDirectory = await mkdtemp(
+    path.join(tmpdir(), "ibuki-base-package-test-"),
+  );
+
+  try {
+    const invalidSpringDestination = path.join(workingDirectory, "invalid-spring");
+    const invalidSpring = spawnSync(
+      "pwsh",
+      [
+        "-NoProfile",
+        "-File",
+        bootstrapPath,
+        "-Blueprint",
+        "api-spring-postgres",
+        "-ProjectId",
+        "invalid-package",
+        "-BasePackage",
+        "net.rukaruka966.bad/package",
+        "-Destination",
+        invalidSpringDestination,
+        "-SkipGitHub",
+        "-NonInteractive",
+        "-Yes",
+      ],
+      { cwd: workingDirectory, encoding: "utf8", timeout: 30_000 },
+    );
+    assert.notEqual(invalidSpring.status, 0);
+    assert.match(
+      `${invalidSpring.stdout}\n${invalidSpring.stderr}`,
+      /Base package must contain/,
+    );
+    await assert.rejects(access(invalidSpringDestination));
+
+    const webDestination = path.join(workingDirectory, "invalid-web");
+    const invalidWeb = spawnSync(
+      "pwsh",
+      [
+        "-NoProfile",
+        "-File",
+        bootstrapPath,
+        "-Blueprint",
+        "web-hono",
+        "-ProjectId",
+        "invalid-web-package",
+        "-BasePackage",
+        "net.rukaruka966.web",
+        "-Destination",
+        webDestination,
+        "-SkipGitHub",
+        "-NonInteractive",
+        "-Yes",
+      ],
+      { cwd: workingDirectory, encoding: "utf8", timeout: 30_000 },
+    );
+    assert.notEqual(invalidWeb.status, 0);
+    assert.match(
+      `${invalidWeb.stdout}\n${invalidWeb.stderr}`,
+      /-BasePackage can only be used with a Spring Blueprint/,
+    );
+    await assert.rejects(access(webDestination));
+  } finally {
+    await rm(workingDirectory, { recursive: true, force: true });
+  }
+});
+
+test("normalized Project IDs produce safe deterministic default Base Packages", async () => {
+  const workingDirectory = await mkdtemp(
+    path.join(tmpdir(), "ibuki-reserved-package-test-"),
+  );
+
+  try {
+    for (const [projectId, normalizedSegment] of [
+      ["class", "classapp"],
+      ["object", "objectapp"],
+      ["when", "whenapp"],
+      ["data", "dataapp"],
+      ["co-n", "conapp"],
+      ["co-m1", "com1app"],
+      ["lp-t1", "lpt1app"],
+    ]) {
+      const destination = path.join(workingDirectory, projectId);
+      const result = spawnSync(
+        "pwsh",
+        [
+          "-NoProfile",
+          "-File",
+          bootstrapPath,
+          "-Blueprint",
+          "api-spring-postgres",
+          "-ProjectId",
+          projectId,
+          "-Destination",
+          destination,
+          "-SkipGitHub",
+          "-NonInteractive",
+          "-Yes",
+        ],
+        { cwd: workingDirectory, encoding: "utf8", timeout: 30_000 },
+      );
+      const output = `${result.stdout}\n${result.stderr}`;
+      const expectedPackage = `net.rukaruka966.${normalizedSegment}`;
+
+      assert.equal(result.status, 0, output);
+      assert.match(
+        output,
+        new RegExp(`Base package\\s+: ${expectedPackage.replaceAll(".", "\\.")}`),
+      );
+      await access(
+        path.join(
+          destination,
+          "systems",
+          "api-server",
+          "src",
+          "main",
+          "kotlin",
+          ...expectedPackage.split("."),
+          "Application.kt",
+        ),
+      );
+    }
+  } finally {
+    await rm(workingDirectory, { recursive: true, force: true });
+  }
+});
+
+test("Windows device names are rejected during Project ID and Base Package validation", async () => {
+  const workingDirectory = await mkdtemp(
+    path.join(tmpdir(), "ibuki-device-name-test-"),
+  );
+
+  try {
+    for (const projectId of ["con", "com1", "lpt1"]) {
+      const destination = path.join(workingDirectory, `project-${projectId}`);
+      const result = spawnSync(
+        "pwsh",
+        [
+          "-NoProfile",
+          "-File",
+          bootstrapPath,
+          "-ProjectId",
+          projectId,
+          "-Destination",
+          destination,
+          "-SkipGitHub",
+          "-NonInteractive",
+          "-Yes",
+        ],
+        { cwd: workingDirectory, encoding: "utf8", timeout: 30_000 },
+      );
+      const output = `${result.stdout}\n${result.stderr}`;
+
+      assert.notEqual(result.status, 0, output);
+      assert.match(output, /reserved Windows device name/);
+      await assert.rejects(access(destination));
+    }
+
+    for (const deviceSegment of ["con", "com1", "lpt1"]) {
+      const destination = path.join(workingDirectory, `package-${deviceSegment}`);
+      const result = spawnSync(
+        "pwsh",
+        [
+          "-NoProfile",
+          "-File",
+          bootstrapPath,
+          "-Blueprint",
+          "api-spring-postgres",
+          "-ProjectId",
+          `package-${deviceSegment}`,
+          "-BasePackage",
+          `net.rukaruka966.${deviceSegment}`,
+          "-Destination",
+          destination,
+          "-SkipGitHub",
+          "-NonInteractive",
+          "-Yes",
+        ],
+        { cwd: workingDirectory, encoding: "utf8", timeout: 30_000 },
+      );
+      const output = `${result.stdout}\n${result.stderr}`;
+
+      assert.notEqual(result.status, 0, output);
+      assert.match(output, /reserved Windows device name/);
+      await assert.rejects(access(destination));
+    }
   } finally {
     await rm(workingDirectory, { recursive: true, force: true });
   }
@@ -301,7 +523,7 @@ test("interactive wizard can cancel after a Coming soon choice", async () => {
       {
         cwd: workingDirectory,
         encoding: "utf8",
-        input: "4\nq\n",
+        input: "5\nq\n",
         timeout: 30_000,
       },
     );

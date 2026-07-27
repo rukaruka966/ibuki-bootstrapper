@@ -14,6 +14,7 @@ param(
     [string]$Blueprint,
     [string]$ProjectId,
     [string]$DisplayName,
+    [string]$BasePackage,
     [string]$Destination,
     [string]$RepositoryName,
     [string]$RepositoryDescription,
@@ -56,6 +57,7 @@ $state = [PSCustomObject]@{
     MaximumBlueprintFiles = 256
     MaximumBlueprintSourceBytes = 10MB
     MaximumBlueprintTotalBytes = 50MB
+    MaximumGeneratedPathLength = 240
 }
 
 function Write-Phase {
@@ -137,6 +139,15 @@ function Assert-Command {
     Write-Host "[OK] $Name"
 }
 
+function Test-WindowsDeviceName {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Value
+    )
+
+    return $Value.ToLowerInvariant() -match '^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])$'
+}
+
 function Assert-ProjectId {
     param(
         [Parameter(Mandatory)]
@@ -148,6 +159,51 @@ function Assert-ProjectId {
 
     if ($Value -notmatch '^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$') {
         throw "$Label must start with a lowercase letter and contain only lowercase letters, numbers, and single hyphens."
+    }
+
+    if (Test-WindowsDeviceName -Value $Value) {
+        throw "$Label cannot be a reserved Windows device name: '$Value'."
+    }
+}
+
+function Get-JavaKotlinReservedWords {
+    return @(
+        "abstract", "actual", "annotation", "as", "assert", "boolean", "break",
+        "by", "byte", "case", "catch", "char", "class", "companion", "const",
+        "constructor", "continue", "crossinline", "data", "default", "delegate",
+        "do", "double", "dynamic", "else", "enum", "expect", "exports", "extends",
+        "external", "false", "field", "file", "final", "finally", "float", "for",
+        "fun", "get", "goto", "if", "implements", "import", "in", "infix", "init",
+        "inline", "inner", "instanceof", "int", "interface", "internal", "is",
+        "lateinit", "long", "module", "native", "new", "noinline", "non-sealed",
+        "null", "object", "open", "opens", "operator", "out", "override", "package",
+        "param", "permits", "private", "property", "protected", "public", "receiver",
+        "record", "reified", "requires", "return", "sealed", "set", "setparam",
+        "short", "static", "strictfp", "super", "suspend", "switch", "synchronized",
+        "tailrec", "this", "throw", "throws", "to", "transient", "transitive", "true",
+        "try", "typealias", "typeof", "uses", "val", "var", "vararg", "void",
+        "volatile", "when", "where", "while", "with", "yield"
+    )
+}
+
+function Assert-BasePackage {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Value
+    )
+
+    if ($Value -notmatch '^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$') {
+        throw "Base package must contain at least two lowercase Java/Kotlin identifier segments separated by dots."
+    }
+
+    foreach ($segment in $Value.Split(".")) {
+        if ((Get-JavaKotlinReservedWords) -contains $segment) {
+            throw "Base package contains a reserved Java/Kotlin word: '$segment'."
+        }
+
+        if (Test-WindowsDeviceName -Value $segment) {
+            throw "Base package contains a reserved Windows device name: '$segment'."
+        }
     }
 }
 
@@ -395,8 +451,9 @@ function Select-Blueprint {
         Write-Host "  [1] Web: React + Hono (available)"
         Write-Host "  [2] Web: React + Hono + Spring Boot (Coming soon)"
         Write-Host "  [3] Web API: Spring Boot (available)"
-        Write-Host "  [4] Android: Jetpack Compose (Coming soon)"
-        Write-Host "  [5] Windows Desktop: Compose Multiplatform (Coming soon)"
+        Write-Host "  [4] Web API: Spring Boot + PostgreSQL (available)"
+        Write-Host "  [5] Android: Jetpack Compose (Coming soon)"
+        Write-Host "  [6] Windows Desktop: Compose Multiplatform (Coming soon)"
         Write-Host "  [0] Cancel"
 
         $selection = Read-Host "Configuration [default: 1]"
@@ -418,10 +475,13 @@ function Select-Blueprint {
                 return "api-spring"
             }
             "4" {
+                return "api-spring-postgres"
+            }
+            "5" {
                 Write-Warning "Android: Jetpack Compose is Coming soon. Select an available configuration."
                 continue
             }
-            "5" {
+            "6" {
                 Write-Warning "Windows Desktop: Compose Multiplatform is Coming soon. Select an available configuration."
                 continue
             }
@@ -429,7 +489,7 @@ function Select-Blueprint {
                 return $null
             }
             default {
-                Write-Warning "Unknown selection '$selection'. Enter 0, 1, 2, 3, 4, or 5."
+                Write-Warning "Unknown selection '$selection'. Enter 0, 1, 2, 3, 4, 5, or 6."
                 continue
             }
         }
@@ -461,6 +521,7 @@ function Resolve-BootstrapConfiguration {
     $resolvedBlueprint = $Blueprint
     $resolvedProjectId = $ProjectId
     $resolvedDisplayName = $DisplayName
+    $resolvedBasePackage = $BasePackage
     $resolvedDestination = $Destination
     $resolvedRepositoryName = $RepositoryName
 
@@ -506,6 +567,40 @@ function Resolve-BootstrapConfiguration {
         }
     }
 
+    $isSpringBlueprint = @("api-spring", "api-spring-postgres") -contains $resolvedBlueprint
+
+    if ($isSpringBlueprint) {
+        if ([string]::IsNullOrWhiteSpace($resolvedBasePackage)) {
+            $normalizedProjectId = $resolvedProjectId.Replace("-", "").ToLowerInvariant()
+
+            if (
+                (Get-JavaKotlinReservedWords) -contains $normalizedProjectId -or
+                (Test-WindowsDeviceName -Value $normalizedProjectId)
+            ) {
+                $normalizedProjectId = "${normalizedProjectId}app"
+            }
+
+            $defaultBasePackage = "net.rukaruka966.$normalizedProjectId"
+
+            if ($NonInteractive) {
+                $resolvedBasePackage = $defaultBasePackage
+            } else {
+                $resolvedBasePackage = Read-Host "Base package [$defaultBasePackage]"
+
+                if ($null -eq $resolvedBasePackage) {
+                    $state.CancelRequested = $true
+                    return $null
+                }
+
+                if ([string]::IsNullOrWhiteSpace($resolvedBasePackage)) {
+                    $resolvedBasePackage = $defaultBasePackage
+                }
+            }
+        }
+    } elseif (-not [string]::IsNullOrWhiteSpace($resolvedBasePackage)) {
+        throw "-BasePackage can only be used with a Spring Blueprint."
+    }
+
     if ($UseCurrentDirectory) {
         $resolvedDestination = (Get-Location).Path
     } elseif ([string]::IsNullOrWhiteSpace($resolvedDestination)) {
@@ -547,6 +642,12 @@ function Resolve-BootstrapConfiguration {
         BlueprintId = $resolvedBlueprint
         ProjectId = $resolvedProjectId
         DisplayName = $resolvedDisplayName
+        BasePackage = $resolvedBasePackage
+        BasePackagePath = if ($isSpringBlueprint) {
+            $resolvedBasePackage.Replace(".", "/")
+        } else {
+            ""
+        }
         Destination = [System.IO.Path]::GetFullPath($resolvedDestination)
         CreateGitHub = $createGitHub
         GitHubOwner = ""
@@ -561,8 +662,8 @@ function Assert-BootstrapConfiguration {
         [PSCustomObject]$Configuration
     )
 
-    if (@("web-hono", "api-spring") -notcontains $Configuration.BlueprintId) {
-        throw "Blueprint '$($Configuration.BlueprintId)' is not available. Available blueprints: web-hono, api-spring."
+    if (@("web-hono", "api-spring", "api-spring-postgres") -notcontains $Configuration.BlueprintId) {
+        throw "Blueprint '$($Configuration.BlueprintId)' is not available. Available blueprints: web-hono, api-spring, api-spring-postgres."
     }
 
     Assert-ProjectId -Value $Configuration.ProjectId -Label "Project ID"
@@ -570,6 +671,12 @@ function Assert-BootstrapConfiguration {
 
     if ($Configuration.DisplayName -match "[`r`n]") {
         throw "Display name cannot contain newlines."
+    }
+
+    if (@("api-spring", "api-spring-postgres") -contains $Configuration.BlueprintId) {
+        Assert-BasePackage -Value $Configuration.BasePackage
+    } elseif (-not [string]::IsNullOrWhiteSpace($Configuration.BasePackage)) {
+        throw "Base package is not supported by Blueprint '$($Configuration.BlueprintId)'."
     }
 
     $destinationLength = $Configuration.Destination.Length
@@ -601,6 +708,10 @@ function Show-BootstrapConfiguration {
     Write-Host "Configuration     : $($Manifest.displayName)"
     Write-Host "Project ID        : $($Configuration.ProjectId)"
     Write-Host "Display name      : $($Configuration.DisplayName)"
+
+    if (-not [string]::IsNullOrWhiteSpace($Configuration.BasePackage)) {
+        Write-Host "Base package      : $($Configuration.BasePackage)"
+    }
     Write-Host "Destination       : $($Configuration.Destination)"
 
     if ($Configuration.CreateGitHub) {
@@ -853,9 +964,9 @@ function Assert-BlueprintManifest {
             $Manifest.schemaVersion -isnot [int] -and
             $Manifest.schemaVersion -isnot [long]
         ) -or
-            $Manifest.schemaVersion -ne 3
+            $Manifest.schemaVersion -ne 4
     ) {
-        throw "Blueprint manifest '$BlueprintId' must use schemaVersion 3."
+        throw "Blueprint manifest '$BlueprintId' must use schemaVersion 4."
     }
 
     if (
@@ -1006,7 +1117,14 @@ function Assert-BlueprintManifest {
 
     foreach ($file in @($Manifest.files)) {
         $propertyNames = @($file.PSObject.Properties.Name)
-        $allowedFileProperties = @("kind", "source", "target", "template", "sha256")
+        $allowedFileProperties = @(
+            "kind",
+            "source",
+            "target",
+            "template",
+            "targetTemplate",
+            "sha256"
+        )
 
         if (@(
             $propertyNames | Where-Object {
@@ -1074,6 +1192,33 @@ function Assert-BlueprintManifest {
 
         if ($file.template -isnot [bool]) {
             throw "Blueprint manifest '$BlueprintId' has a non-boolean template flag for '$($file.target)'."
+        }
+
+        if (
+            $propertyNames -contains "targetTemplate" -and
+            $file.targetTemplate -isnot [bool]
+        ) {
+            throw "Blueprint manifest '$BlueprintId' has a non-boolean targetTemplate flag for '$($file.target)'."
+        }
+
+        $targetTemplate = $propertyNames -contains "targetTemplate" -and $file.targetTemplate
+        $targetTokens = @(
+            [regex]::Matches([string]$file.target, '__[A-Z0-9_]+__') |
+                ForEach-Object { $_.Value }
+        )
+
+        if ($targetTemplate) {
+            if (
+                $targetTokens.Count -eq 0 -or
+                @(
+                    $targetTokens |
+                        Where-Object { $_ -ne "__BASE_PACKAGE_PATH__" }
+                ).Count -gt 0
+            ) {
+                throw "Blueprint target template may only use __BASE_PACKAGE_PATH__: '$($file.target)'."
+            }
+        } elseif ($targetTokens.Count -gt 0) {
+            throw "Blueprint target contains a token without targetTemplate: '$($file.target)'."
         }
 
         if (@("text", "binary") -notcontains $file.kind) {
@@ -1216,6 +1361,77 @@ function Convert-TemplateContent {
             return [string]$Tokens[$match.Value]
         }
     )
+}
+
+function Assert-PreparedTargetPaths {
+    param(
+        [Parameter(Mandatory)]
+        [string]$DestinationRoot,
+
+        [Parameter(Mandatory)]
+        [System.Collections.Generic.List[object]]$PreparedFiles
+    )
+
+    $canonicalRoot = [System.IO.Path]::GetFullPath($DestinationRoot)
+    $rootPrefix = $canonicalRoot.TrimEnd(
+        [System.IO.Path]::DirectorySeparatorChar,
+        [System.IO.Path]::AltDirectorySeparatorChar
+    ) + [System.IO.Path]::DirectorySeparatorChar
+    $targets = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::OrdinalIgnoreCase
+    )
+
+    foreach ($preparedFile in $PreparedFiles) {
+        Assert-SafeBlueprintRelativePath `
+            -Value $preparedFile.Target `
+            -Label "rendered target"
+        $canonicalTarget = [System.IO.Path]::GetFullPath(
+            (Join-Path $canonicalRoot $preparedFile.Target)
+        )
+
+        if (-not $canonicalTarget.StartsWith(
+            $rootPrefix,
+            [System.StringComparison]::OrdinalIgnoreCase
+        )) {
+            throw "Rendered Blueprint target escapes the destination: '$($preparedFile.Target)'."
+        }
+
+        if ($canonicalTarget.Length -gt $state.MaximumGeneratedPathLength) {
+            throw (
+                "Rendered Blueprint target path is too long " +
+                "($($canonicalTarget.Length) characters; " +
+                "maximum $($state.MaximumGeneratedPathLength)): '$($preparedFile.Target)'."
+            )
+        }
+
+        foreach ($existingTarget in $targets) {
+            $existingPrefix = $existingTarget.TrimEnd(
+                [System.IO.Path]::DirectorySeparatorChar,
+                [System.IO.Path]::AltDirectorySeparatorChar
+            ) + [System.IO.Path]::DirectorySeparatorChar
+            $candidatePrefix = $canonicalTarget.TrimEnd(
+                [System.IO.Path]::DirectorySeparatorChar,
+                [System.IO.Path]::AltDirectorySeparatorChar
+            ) + [System.IO.Path]::DirectorySeparatorChar
+
+            if (
+                $canonicalTarget.StartsWith(
+                    $existingPrefix,
+                    [System.StringComparison]::OrdinalIgnoreCase
+                ) -or
+                $existingTarget.StartsWith(
+                    $candidatePrefix,
+                    [System.StringComparison]::OrdinalIgnoreCase
+                )
+            ) {
+                throw "Rendered Blueprint targets have a file/directory collision."
+            }
+        }
+
+        if (-not $targets.Add($canonicalTarget)) {
+            throw "Rendered Blueprint contains a duplicate target: '$($preparedFile.Target)'."
+        }
+    }
 }
 
 function Write-GeneratedFile {
@@ -1921,6 +2137,7 @@ function Invoke-IbukiBootstrap {
     $Blueprint = $configuration.BlueprintId
     $ProjectId = $configuration.ProjectId
     $DisplayName = $configuration.DisplayName
+    $BasePackage = $configuration.BasePackage
     $Destination = $configuration.Destination
     $RepositoryName = $configuration.RepositoryName
 
@@ -1940,17 +2157,27 @@ function Invoke-IbukiBootstrap {
         "__PROJECT_DISPLAY_NAME_YAML__" = $displayNameYaml
         "__PROJECT_DISPLAY_NAME_JSON__" = $displayNameJson
         "__PROJECT_DISPLAY_NAME_HTML__" = $displayNameHtml
+        "__BASE_PACKAGE__" = $configuration.BasePackage
+        "__BASE_PACKAGE_PATH__" = $configuration.BasePackagePath
     }
     $preparedFiles = [System.Collections.Generic.List[object]]::new()
     $strictUtf8WithoutBom = [System.Text.UTF8Encoding]::new($false, $true)
 
     foreach ($file in $manifest.files) {
         $sourceBytes = $blueprintSources[[string]$file.source]
+        $target = [string]$file.target
+
+        if (
+            @($file.PSObject.Properties.Name) -contains "targetTemplate" -and
+            $file.targetTemplate
+        ) {
+            $target = Convert-TemplateContent -Content $target -Tokens $tokens
+        }
 
         if ($file.kind -eq "binary") {
             $preparedFiles.Add([PSCustomObject]@{
                 Kind = "binary"
-                Target = [string]$file.target
+                Target = $target
                 Bytes = $sourceBytes
             })
         } else {
@@ -1966,11 +2193,15 @@ function Invoke-IbukiBootstrap {
             $renderedBytes = $strictUtf8WithoutBom.GetBytes($normalizedContent)
             $preparedFiles.Add([PSCustomObject]@{
                 Kind = "text"
-                Target = [string]$file.target
+                Target = $target
                 Bytes = $renderedBytes
             })
         }
     }
+
+    Assert-PreparedTargetPaths `
+        -DestinationRoot $Destination `
+        -PreparedFiles $preparedFiles
 
     if (-not (Test-Path -LiteralPath $Destination)) {
         New-Item -ItemType Directory -Path $Destination -Force | Out-Null
@@ -2091,6 +2322,7 @@ function ConvertTo-CoreParameterSplat {
         "blueprint" = @{ Name = "Blueprint"; IsSwitch = $false }
         "projectid" = @{ Name = "ProjectId"; IsSwitch = $false }
         "displayname" = @{ Name = "DisplayName"; IsSwitch = $false }
+        "basepackage" = @{ Name = "BasePackage"; IsSwitch = $false }
         "destination" = @{ Name = "Destination"; IsSwitch = $false }
         "repositoryname" = @{ Name = "RepositoryName"; IsSwitch = $false }
         "repositorydescription" = @{ Name = "RepositoryDescription"; IsSwitch = $false }

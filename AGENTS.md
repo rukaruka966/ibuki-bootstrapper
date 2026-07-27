@@ -29,7 +29,7 @@ pnpm run test:generated
 pnpm run verify
 ```
 
-`pnpm run test:generated` and `pnpm run verify` generate both available
+`pnpm run test:generated` and `pnpm run verify` generate all available
 Blueprints and verify their file contract. They do not install generated
 dependencies or require Node.js, pnpm, or a JDK on behalf of generated projects.
 
