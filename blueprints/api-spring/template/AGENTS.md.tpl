@@ -10,15 +10,19 @@ Japanese reference: [`docs/ja-JP/AGENTS-ja.md`](docs/ja-JP/AGENTS-ja.md)
 - Runtime: JDK 17
 - Framework: Kotlin and Spring Boot 4.1.0
 - Build tool: Gradle Wrapper
+- Package and task runner: pnpm
 
 ## Commands
 
-Run repository quality tasks through the Gradle Wrapper:
+Run repository tasks through pnpm from the repository root. pnpm delegates
+Spring tasks to the checked-in Gradle Wrapper:
 
 ```powershell
-Set-Location ./systems/api-server
-.\gradlew.bat check
-.\gradlew.bat bootJar
+pnpm dev
+pnpm test
+pnpm check
+pnpm build
+pnpm release
 ```
 
 ## API conventions
@@ -38,6 +42,6 @@ Set-Location ./systems/api-server
 
 ## Definition of Done
 
-- `gradlew.bat check` and `gradlew.bat bootJar` pass.
+- `pnpm check` and `pnpm build` pass.
 - Unknown routes return RFC 7807 Problem Details.
 - Documentation matches changed commands and contracts.

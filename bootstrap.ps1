@@ -722,18 +722,37 @@ function Show-BootstrapConfiguration {
         Write-Host "Branches          : none (local generation only)"
     }
 
-    Write-Host "Generated project requirements (not checked by Ibuki):"
-
-    foreach ($requirement in @($Manifest.projectRequirements)) {
-        $versionRequirement = if (
-            @($requirement.PSObject.Properties.Name) -contains "requiredMajor"
-        ) {
-            "major version $($requirement.requiredMajor) required " +
-                "(minimum $($requirement.minimumVersion))"
-        } else {
-            ">= $($requirement.minimumVersion)"
+    foreach ($requirementGroup in @(
+        [PSCustomObject]@{
+            Category = "repository"
+            Heading = "Repository operation requirements (not checked by Ibuki):"
+        },
+        [PSCustomObject]@{
+            Category = "application"
+            Heading = "Application development requirements (not checked by Ibuki):"
         }
-        Write-Host "  $($requirement.id) : $versionRequirement"
+    )) {
+        $requirements = @(
+            $Manifest.projectRequirements | Where-Object {
+                $_.category -eq $requirementGroup.Category
+            }
+        )
+
+        if ($requirements.Count -gt 0) {
+            Write-Host $requirementGroup.Heading
+
+            foreach ($requirement in $requirements) {
+                $versionRequirement = if (
+                    @($requirement.PSObject.Properties.Name) -contains "requiredMajor"
+                ) {
+                    "major version $($requirement.requiredMajor) required " +
+                        "(minimum $($requirement.minimumVersion))"
+                } else {
+                    ">= $($requirement.minimumVersion)"
+                }
+                Write-Host "  $($requirement.id) : $versionRequirement"
+            }
+        }
     }
 
     Write-Host "Project-owned checks (not run by Ibuki):"
@@ -752,6 +771,8 @@ function Get-BlueprintSourceBytes {
 
         [Parameter(Mandatory)]
         [string]$BlueprintId,
+
+        [string]$RemoteAssetRoot = "",
 
         [switch]$UseLocalBlueprint
     )
@@ -794,7 +815,12 @@ function Get-BlueprintSourceBytes {
         return ,([System.IO.File]::ReadAllBytes($canonicalSource))
     }
 
-    $uri = "$($state.RawBaseUrl)/blueprints/$BlueprintId/$Source"
+    $assetRoot = if ([string]::IsNullOrWhiteSpace($RemoteAssetRoot)) {
+        "blueprints/$BlueprintId"
+    } else {
+        $RemoteAssetRoot
+    }
+    $uri = "$($state.RawBaseUrl)/$assetRoot/$Source"
     $client = [System.Net.Http.HttpClient]::new()
 
     try {
@@ -844,6 +870,8 @@ function Read-BlueprintManifest {
 
         [string]$LocalBlueprintRoot = "",
 
+        [string]$RemoteAssetRoot = "",
+
         [switch]$UseLocalBlueprint
     )
 
@@ -851,6 +879,7 @@ function Read-BlueprintManifest {
         -Source "manifest.json" `
         -LocalBlueprintRoot $LocalBlueprintRoot `
         -BlueprintId $BlueprintId `
+        -RemoteAssetRoot $RemoteAssetRoot `
         -UseLocalBlueprint:$UseLocalBlueprint
 
     if ($bytes.Length -gt $state.MaximumBlueprintSourceBytes) {
@@ -941,6 +970,7 @@ function Assert-BlueprintManifest {
         "displayName",
         "projectRequirements",
         "recommendedCommands",
+        "fileSets",
         "files"
     )
     $unknownManifestProperties = @(
@@ -964,9 +994,9 @@ function Assert-BlueprintManifest {
             $Manifest.schemaVersion -isnot [int] -and
             $Manifest.schemaVersion -isnot [long]
         ) -or
-            $Manifest.schemaVersion -ne 4
+            $Manifest.schemaVersion -ne 5
     ) {
-        throw "Blueprint manifest '$BlueprintId' must use schemaVersion 4."
+        throw "Blueprint manifest '$BlueprintId' must use schemaVersion 5."
     }
 
     if (
@@ -975,6 +1005,7 @@ function Assert-BlueprintManifest {
         $Manifest.displayName -isnot [string] -or
         $Manifest.projectRequirements -isnot [System.Array] -or
         $Manifest.recommendedCommands -isnot [System.Array] -or
+        $Manifest.fileSets -isnot [System.Array] -or
         $Manifest.files -isnot [System.Array]
     ) {
         throw "Blueprint manifest '$BlueprintId' has invalid top-level property types."
@@ -992,6 +1023,20 @@ function Assert-BlueprintManifest {
         throw "Blueprint manifest '$BlueprintId' does not have a version."
     }
 
+    $fileSetIds = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::OrdinalIgnoreCase
+    )
+
+    foreach ($fileSetId in @($Manifest.fileSets)) {
+        if (
+            $fileSetId -isnot [string] -or
+            [string]$fileSetId -notmatch '^[a-z][a-z0-9-]{0,63}$' -or
+            -not $fileSetIds.Add([string]$fileSetId)
+        ) {
+            throw "Blueprint manifest '$BlueprintId' has an invalid or duplicate file set ID."
+        }
+    }
+
     $requirementIds = [System.Collections.Generic.HashSet[string]]::new(
         [System.StringComparer]::OrdinalIgnoreCase
     )
@@ -1004,6 +1049,7 @@ function Assert-BlueprintManifest {
             "versionArguments",
             "minimumVersion",
             "versionPattern",
+            "category",
             "requiredMajor"
         )
 
@@ -1020,7 +1066,8 @@ function Assert-BlueprintManifest {
             "command",
             "versionArguments",
             "minimumVersion",
-            "versionPattern"
+            "versionPattern",
+            "category"
         )) {
             if ($requirementProperties -notcontains $requiredProperty) {
                 throw "Blueprint manifest '$BlueprintId' has an incomplete project requirement declaration."
@@ -1043,9 +1090,14 @@ function Assert-BlueprintManifest {
             $requirement.command -isnot [string] -or
             $requirement.minimumVersion -isnot [string] -or
             $requirement.versionPattern -isnot [string] -or
+            $requirement.category -isnot [string] -or
             $requirement.versionArguments -isnot [System.Array]
         ) {
             throw "Blueprint manifest '$BlueprintId' has invalid project requirement property types."
+        }
+
+        if (@("repository", "application") -notcontains $requirement.category) {
+            throw "Blueprint manifest '$BlueprintId' has an invalid project requirement category."
         }
 
         try {
@@ -1276,7 +1328,7 @@ function Assert-BlueprintManifest {
     }
 }
 
-function Read-BlueprintSources {
+function Resolve-BlueprintFiles {
     param(
         [Parameter(Mandatory)]
         [object]$Manifest,
@@ -1286,6 +1338,86 @@ function Read-BlueprintSources {
 
         [string]$LocalBlueprintRoot = "",
 
+        [string]$LocalBlueprintsRoot = "",
+
+        [switch]$UseLocalBlueprint
+    )
+
+    $resolvedFiles = [System.Collections.Generic.List[object]]::new()
+    $combinedFiles = [System.Collections.Generic.List[object]]::new()
+
+    foreach ($file in @($Manifest.files)) {
+        $resolvedFiles.Add([PSCustomObject]@{
+            File = $file
+            SourceKey = "$BlueprintId::$($file.source)"
+            AssetId = $BlueprintId
+            LocalAssetRoot = $LocalBlueprintRoot
+            RemoteAssetRoot = "blueprints/$BlueprintId"
+        })
+        $combinedFiles.Add($file)
+    }
+
+    foreach ($fileSetId in @($Manifest.fileSets)) {
+        $localFileSetRoot = if ($UseLocalBlueprint) {
+            Join-Path $LocalBlueprintsRoot "_common/$fileSetId"
+        } else {
+            ""
+        }
+        $remoteFileSetRoot = "blueprints/_common/$fileSetId"
+        $fileSetManifest = Read-BlueprintManifest `
+            -BlueprintId $fileSetId `
+            -LocalBlueprintRoot $localFileSetRoot `
+            -RemoteAssetRoot $remoteFileSetRoot `
+            -UseLocalBlueprint:$UseLocalBlueprint
+
+        Assert-BlueprintManifest `
+            -Manifest $fileSetManifest `
+            -BlueprintId $fileSetId `
+            -LocalBlueprintRoot $localFileSetRoot `
+            -UseLocalBlueprint:$UseLocalBlueprint
+
+        if (
+            @($fileSetManifest.fileSets).Count -ne 0 -or
+            @($fileSetManifest.projectRequirements).Count -ne 0 -or
+            @($fileSetManifest.recommendedCommands).Count -ne 0
+        ) {
+            throw "Blueprint file set '$fileSetId' may only declare files."
+        }
+
+        foreach ($file in @($fileSetManifest.files)) {
+            $resolvedFiles.Add([PSCustomObject]@{
+                File = $file
+                SourceKey = "$fileSetId::$($file.source)"
+                AssetId = $fileSetId
+                LocalAssetRoot = $localFileSetRoot
+                RemoteAssetRoot = $remoteFileSetRoot
+            })
+            $combinedFiles.Add($file)
+        }
+    }
+
+    $combinedManifest = [PSCustomObject]@{
+        schemaVersion = 5
+        id = $Manifest.id
+        version = $Manifest.version
+        displayName = $Manifest.displayName
+        projectRequirements = @($Manifest.projectRequirements)
+        recommendedCommands = @($Manifest.recommendedCommands)
+        fileSets = @()
+        files = @($combinedFiles)
+    }
+    Assert-BlueprintManifest `
+        -Manifest $combinedManifest `
+        -BlueprintId $BlueprintId
+
+    return ,$resolvedFiles
+}
+
+function Read-BlueprintSources {
+    param(
+        [Parameter(Mandatory)]
+        [System.Collections.Generic.List[object]]$ResolvedFiles,
+
         [switch]$UseLocalBlueprint
     )
 
@@ -1294,12 +1426,16 @@ function Read-BlueprintSources {
     )
     $totalBytes = [long]0
 
-    foreach ($file in @($Manifest.files)) {
-        if (-not $sources.ContainsKey([string]$file.source)) {
+    foreach ($resolvedFile in @($ResolvedFiles)) {
+        $file = $resolvedFile.File
+        $sourceKey = [string]$resolvedFile.SourceKey
+
+        if (-not $sources.ContainsKey($sourceKey)) {
             $bytes = Get-BlueprintSourceBytes `
                 -Source $file.source `
-                -LocalBlueprintRoot $LocalBlueprintRoot `
-                -BlueprintId $BlueprintId `
+                -LocalBlueprintRoot $resolvedFile.LocalAssetRoot `
+                -BlueprintId $resolvedFile.AssetId `
+                -RemoteAssetRoot $resolvedFile.RemoteAssetRoot `
                 -UseLocalBlueprint:$UseLocalBlueprint
 
             if ($bytes.Length -gt $state.MaximumBlueprintSourceBytes) {
@@ -1312,10 +1448,10 @@ function Read-BlueprintSources {
                 throw "Blueprint sources exceed the total size limit."
             }
 
-            $sources.Add([string]$file.source, $bytes)
+            $sources.Add($sourceKey, $bytes)
         }
 
-        $sourceBytes = $sources[[string]$file.source]
+        $sourceBytes = $sources[$sourceKey]
 
         if ($file.kind -eq "text") {
             $null = ConvertFrom-BlueprintTextBytes `
@@ -2032,9 +2168,11 @@ function Invoke-IbukiBootstrap {
     Assert-BootstrapConfiguration -Configuration $configuration
 
     $localBlueprintRoot = ""
+    $localBlueprintsRoot = ""
     $useLocalBlueprint = $false
 
     if (-not [string]::IsNullOrWhiteSpace($BootstrapRoot)) {
+        $localBlueprintsRoot = Join-Path $BootstrapRoot "blueprints"
         $candidate = Join-Path $BootstrapRoot "blueprints/$($configuration.BlueprintId)"
 
         if (Test-LocalBlueprintAvailable -Root $BootstrapRoot -BlueprintId $configuration.BlueprintId) {
@@ -2076,10 +2214,15 @@ function Invoke-IbukiBootstrap {
         -LocalBlueprintRoot $localBlueprintRoot `
         -UseLocalBlueprint:$useLocalBlueprint
 
-    $blueprintSources = Read-BlueprintSources `
+    $resolvedFiles = Resolve-BlueprintFiles `
         -Manifest $manifest `
         -BlueprintId $configuration.BlueprintId `
         -LocalBlueprintRoot $localBlueprintRoot `
+        -LocalBlueprintsRoot $localBlueprintsRoot `
+        -UseLocalBlueprint:$useLocalBlueprint
+
+    $blueprintSources = Read-BlueprintSources `
+        -ResolvedFiles $resolvedFiles `
         -UseLocalBlueprint:$useLocalBlueprint
 
     if ($configuration.CreateGitHub) {
@@ -2163,8 +2306,9 @@ function Invoke-IbukiBootstrap {
     $preparedFiles = [System.Collections.Generic.List[object]]::new()
     $strictUtf8WithoutBom = [System.Text.UTF8Encoding]::new($false, $true)
 
-    foreach ($file in $manifest.files) {
-        $sourceBytes = $blueprintSources[[string]$file.source]
+    foreach ($resolvedFile in $resolvedFiles) {
+        $file = $resolvedFile.File
+        $sourceBytes = $blueprintSources[[string]$resolvedFile.SourceKey]
         $target = [string]$file.target
 
         if (

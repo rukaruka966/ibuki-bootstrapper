@@ -33,11 +33,13 @@ GitHub Repositoryも作成する場合だけ、次を追加で使用します。
 | Blueprint | 生成後の開発環境 |
 | --- | --- |
 | `web-hono` | Node.js 24.10.0以降、pnpm 11以降 |
-| `api-spring` | `java`と`javac`を含むJDK 17 |
-| `api-spring-postgres` | JDK 17。E2Eを明示実行する場合だけDocker Desktop |
+| `api-spring` | Node.js 24.10.0以降、pnpm 11以降、`java`と`javac`を含むJDK 17 |
+| `api-spring-postgres` | Node.js 24.10.0以降、pnpm 11以降、JDK 17。E2Eを明示実行する場合だけDocker Desktop |
 
-`api-spring`ではNode.jsとpnpmを生成要件にしません。JDK 17.0.1+12でも互換確認を
-行いますが、通常は最新のセキュリティ更新が適用されたJDK 17を使用してください。
+全Blueprintで、lint、test、build、releaseなどのRepository操作をルートのpnpm
+scriptsへ統一します。Spring系でもGradleを置き換えるのではなく、pnpmから同梱の
+Gradle Wrapperを呼び出します。JDK 17.0.1+12でも互換確認を行いますが、通常は
+最新のセキュリティ更新が適用されたJDK 17を使用してください。
 
 ## 実行方法
 
@@ -118,7 +120,7 @@ Windows上の各種開発ツールとの互換性を保つため、正規化後�
 - `AGENTS.md`と`DESIGN.md`の日本語参考版
 - `/internal/health`ヘルスチェック
 - RFC 7807形式の404レスポンス
-- 単体テスト・型検査・ビルドを実行するプロジェクト側のコマンドとCI
+- 単体テスト・型検査・ビルド・Releaseを実行するルートpnpm scriptsとCI
 - Private GitHubリポジトリの作成
 - `main`・`develop`ブランチの作成とRuleset設定
 
@@ -126,10 +128,11 @@ Windows上の各種開発ツールとの互換性を保つため、正規化後�
 
 - Kotlin・Spring Boot 4.1.0 Web API
 - Gradle Kotlin DSL・Gradle Wrapper・Java Toolchain 17
-- `systems/api-server`単独でのtest・executable jar生成
+- ルートpnpm scriptsからGradle Wrapperへ委譲する共通Repository操作
+- `systems/api-server`でのtest・executable jar生成
 - `/internal/health`ヘルスチェック
 - `application/problem+json`形式の404レスポンス
-- 単体テスト・executable jar生成を実行するプロジェクト側のコマンドとCI
+- 単体テスト・executable jar生成・Releaseを実行するルートpnpm scriptsとCI
 - JDK 17を使用するGitHub Actions `Quality`
 - `AGENTS.md`・`DESIGN.md`と日本語参考版
 - `project.config.yaml`への構成・port・Bootstrapper version記録
@@ -147,6 +150,11 @@ Windows上の各種開発ツールとの互換性を保つため、正規化後�
 Node.js、pnpm、JDKは生成されたプロジェクトを開発するための要件であり、Ibukiが
 ローカルファイルだけを生成する際の前提ではありません。GitHub Repositoryも作成する
 場合に限り、GitとGitHub CLIの利用可否・認証状態を事前確認します。
+
+ブランチポリシー、Release、Repository運用ドキュメントは共通file setから生成し、
+Blueprintごとの重複を避けます。生成先ではルートの`package.json`と
+`pnpm-lock.yaml`を唯一のpnpm workspaceとして使用し、`tooling`などに別のpnpm
+rootは作成しません。
 
 Rulesetでは、Pull Request、未解決スレッドの解消、`Quality`ステータスチェックを
 必須とし、ブランチ削除とforce-pushを禁止します。

@@ -15,7 +15,7 @@ Ibukiはファイル生成だけを行い、以下の依存関係導入やコマ
 
 ```powershell
 pnpm install --frozen-lockfile
-pnpm run dev
+pnpm dev
 ```
 
 フロントエンドは`http://127.0.0.1:5173`、BFFは
@@ -24,11 +24,8 @@ pnpm run dev
 ## 検証
 
 ```powershell
-pnpm run lint
-pnpm run test
-pnpm run typecheck
-pnpm run build
-pnpm run doctor
+pnpm check
+pnpm doctor
 ```
 
 ## リポジトリ運用
@@ -49,3 +46,5 @@ boundaryではありません。
 - UI・UX設計ルール: [`DESIGN.md`](DESIGN.md)
 - UI・UX設計ルールの日本語版:
   [`docs/ja-JP/DESIGN-ja.md`](docs/ja-JP/DESIGN-ja.md)
+- Repository共通の運用:
+  [`docs/ja-JP/REPOSITORY_OPERATIONS-ja.md`](docs/ja-JP/REPOSITORY_OPERATIONS-ja.md)

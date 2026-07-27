@@ -15,3 +15,5 @@
 
 - `/internal/health`を高速かつ任意のInfrastructureに依存させない。
 - 実行可能なSpring Boot JARを1つ生成する。
+- Repositoryの操作窓口にはルートpnpmを使用し、SpringのBuild Systemには
+  Gradle Wrapperを維持する。

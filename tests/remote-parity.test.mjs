@@ -139,9 +139,10 @@ test(`${configuration.blueprint}: local and HTTP Blueprint sources generate iden
     "project=__PROJECT_ID__\nbootstrap=__BOOTSTRAPPER_VERSION__\n",
     "utf8",
   );
+  const commonText = Buffer.from("common repository asset\n", "utf8");
   const binary = Buffer.from([0x00, 0xff, 0x0d, 0x0a, 0x7f]);
   const manifest = {
-    schemaVersion: 4,
+    schemaVersion: 5,
     id: configuration.blueprint,
     version: "test",
     displayName: "Parity fixture",
@@ -152,6 +153,7 @@ test(`${configuration.blueprint}: local and HTTP Blueprint sources generate iden
         versionArguments: ["--version"],
         minimumVersion: "0.0.0",
         versionPattern: "v?(\\d+\\.\\d+\\.\\d+)",
+        category: "repository",
       },
     ],
     recommendedCommands: [
@@ -161,6 +163,7 @@ test(`${configuration.blueprint}: local and HTTP Blueprint sources generate iden
         workingDirectory: ".",
       },
     ],
+    fileSets: ["repository"],
     files: [
       {
         kind: "text",
@@ -182,6 +185,27 @@ test(`${configuration.blueprint}: local and HTTP Blueprint sources generate iden
     `${JSON.stringify(manifest, null, 2)}\n`,
     "utf8",
   );
+  const commonManifest = {
+    schemaVersion: 5,
+    id: "repository",
+    version: "test",
+    displayName: "Common repository fixture",
+    projectRequirements: [],
+    recommendedCommands: [],
+    fileSets: [],
+    files: [
+      {
+        kind: "text",
+        source: "template/common.txt",
+        target: "common.txt",
+        template: false,
+      },
+    ],
+  };
+  const commonManifestBytes = Buffer.from(
+    `${JSON.stringify(commonManifest, null, 2)}\n`,
+    "utf8",
+  );
   const immutableCommit = "1234567890abcdef1234567890abcdef12345678";
   const repositoryApiPath = "/repos/rukaruka966/ibuki-bootstrapper";
   const routes = new Map([
@@ -198,6 +222,14 @@ test(`${configuration.blueprint}: local and HTTP Blueprint sources generate iden
       Buffer.from(`${JSON.stringify({ sha: immutableCommit })}\n`, "utf8"),
     ],
     [`/blueprints/${configuration.blueprint}/manifest.json`, manifestBytes],
+    [
+      "/blueprints/_common/repository/manifest.json",
+      commonManifestBytes,
+    ],
+    [
+      "/blueprints/_common/repository/template/common.txt",
+      commonText,
+    ],
     [
       `/blueprints/${configuration.blueprint}/template/project.txt.tpl`,
       text,
@@ -230,6 +262,13 @@ test(`${configuration.blueprint}: local and HTTP Blueprint sources generate iden
 
   try {
     await mkdir(path.join(blueprintRoot, "template"), { recursive: true });
+    const commonRoot = path.join(
+      localRoot,
+      "blueprints",
+      "_common",
+      "repository",
+    );
+    await mkdir(path.join(commonRoot, "template"), { recursive: true });
     await mkdir(remoteRoot, { recursive: true });
     await copyFile(
       path.join(repositoryRoot, "bootstrap.ps1"),
@@ -241,6 +280,14 @@ test(`${configuration.blueprint}: local and HTTP Blueprint sources generate iden
     );
     await writeFile(path.join(blueprintRoot, "template", "project.txt.tpl"), text);
     await writeFile(path.join(blueprintRoot, "template", "asset.bin"), binary);
+    await writeFile(
+      path.join(commonRoot, "manifest.json"),
+      commonManifestBytes,
+    );
+    await writeFile(
+      path.join(commonRoot, "template", "common.txt"),
+      commonText,
+    );
     initializeRepository(localRoot);
 
     await new Promise((resolve) => {
@@ -287,6 +334,14 @@ test(`${configuration.blueprint}: local and HTTP Blueprint sources generate iden
       ),
       true,
     );
+    assert.equal(
+      requestedUrls.some((url) =>
+        url.includes(
+          `/rukaruka966/ibuki-bootstrapper/${immutableCommit}/blueprints/_common/repository/manifest.json`,
+        ),
+      ),
+      true,
+    );
 
     const localTree = await readTree(localDestination);
     const remoteTree = await readTree(remoteDestination);
@@ -301,6 +356,7 @@ test(`${configuration.blueprint}: local and HTTP Blueprint sources generate iden
         .toString("utf8"),
       "project=parity-project\nbootstrap=0.5.0\n",
     );
+    assert.equal(localTree.get("common.txt").toString("utf8"), commonText.toString("utf8"));
 
     routes.set(
       `/blueprints/${configuration.blueprint}/template/asset.bin`,

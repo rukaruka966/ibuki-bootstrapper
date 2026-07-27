@@ -18,3 +18,5 @@ Japanese reference: [`docs/ja-JP/DESIGN-ja.md`](docs/ja-JP/DESIGN-ja.md)
 - Build one executable Spring Boot JAR.
 - Keep Unit Tests independent from Database and Docker.
 - Run `e2eTest` explicitly; do not connect it to `check`.
+- Use root pnpm commands as the repository interface and keep Gradle Wrapper as
+  the Spring build system.

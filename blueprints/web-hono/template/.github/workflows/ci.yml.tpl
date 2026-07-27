@@ -19,21 +19,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Enforce trusted main pull request source
-        if: github.event_name == 'pull_request' && github.base_ref == 'main'
-        shell: pwsh
-        env:
-          HEAD_REF: ${{ github.head_ref }}
-          BASE_REPOSITORY: ${{ github.repository }}
-          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
-        run: |
-          if (
-            $env:HEAD_REF -ne "develop" -or
-            $env:HEAD_REPOSITORY -ne $env:BASE_REPOSITORY
-          ) {
-            throw "Pull requests targeting main must come from develop in the same repository."
-          }
-
       - name: Checkout
         uses: actions/checkout@v6
 
@@ -60,18 +45,18 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Lint
-        run: pnpm run lint
-
-      - name: Test
-        run: pnpm run test
-
-      - name: Typecheck
-        run: pnpm run typecheck
-
-      - name: Build
-        run: pnpm run build
+      - name: Check
+        run: pnpm check
 
       - name: Doctor
         shell: pwsh
-        run: pnpm run doctor
+        run: pnpm doctor
+
+  release:
+    name: Release
+    needs:
+      - quality
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release.yml

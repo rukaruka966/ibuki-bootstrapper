@@ -14,3 +14,5 @@ Japanese reference: [`docs/ja-JP/DESIGN-ja.md`](docs/ja-JP/DESIGN-ja.md)
 
 - Keep `/internal/health` fast and independent from optional infrastructure.
 - Build one executable Spring Boot JAR.
+- Use root pnpm commands as the repository interface and keep Gradle Wrapper as
+  the Spring build system.

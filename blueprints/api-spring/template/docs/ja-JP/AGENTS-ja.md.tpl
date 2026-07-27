@@ -11,14 +11,19 @@
 - Runtime: JDK 17
 - Framework: Kotlin、Spring Boot 4.1.0
 - Build tool: Gradle Wrapper
+- Package／Task runner: pnpm
 
 ## コマンド
 
 ```powershell
-Set-Location ./systems/api-server
-.\gradlew.bat check
-.\gradlew.bat bootJar
+pnpm dev
+pnpm test
+pnpm check
+pnpm build
+pnpm release
 ```
+
+Repositoryルートのpnpmから、同梱のGradle Wrapperを呼び出します。
 
 ## API規約
 
@@ -36,6 +41,6 @@ Set-Location ./systems/api-server
 
 ## 完了条件
 
-- `gradlew.bat check`と`gradlew.bat bootJar`が成功する。
+- `pnpm check`と`pnpm build`が成功する。
 - 未定義のパスがRFC 7807 Problem Detailsを返す。
 - 文書が変更後のCommandとContractに一致する。
