@@ -8,7 +8,7 @@ branchStrategy:
   integration: develop
 systems:
   - id: api-server
-    type: spring-boot
+    type: spring-boot-postgresql
     port: 8080
 bootstrapper:
   version: __BOOTSTRAPPER_VERSION__

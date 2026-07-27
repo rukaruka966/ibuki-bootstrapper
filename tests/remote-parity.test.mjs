@@ -22,26 +22,32 @@ const repositoryRoot = path.resolve(
   "..",
 );
 
-function runPowerShell(scriptPath, destination, cwd) {
+function runPowerShell(scriptPath, destination, cwd, configuration) {
   return new Promise((resolve, reject) => {
+    const args = [
+      "-NoProfile",
+      "-File",
+      scriptPath,
+      "-Blueprint",
+      configuration.blueprint,
+      "-ProjectId",
+      "parity-project",
+      "-DisplayName",
+      "Parity Project",
+    ];
+    if (configuration.basePackage) {
+      args.push("-BasePackage", configuration.basePackage);
+    }
+    args.push(
+      "-Destination",
+      destination,
+      "-SkipGitHub",
+      "-NonInteractive",
+      "-Yes",
+    );
     const child = spawn(
       "pwsh",
-      [
-        "-NoProfile",
-        "-File",
-        scriptPath,
-        "-Blueprint",
-        "web-hono",
-        "-ProjectId",
-        "parity-project",
-        "-DisplayName",
-        "Parity Project",
-        "-Destination",
-        destination,
-        "-SkipGitHub",
-        "-NonInteractive",
-        "-Yes",
-      ],
+      args,
       { cwd },
     );
     let stdout = "";
@@ -99,11 +105,33 @@ async function readTree(root) {
   return result;
 }
 
-test("local and HTTP Blueprint sources generate identical bytes", async () => {
+for (const configuration of [
+  {
+    blueprint: "web-hono",
+    target: "generated/project.txt",
+  },
+  {
+    blueprint: "api-spring",
+    basePackage: "net.rukaruka966.parity",
+    target: "generated/__BASE_PACKAGE_PATH__/project.txt",
+    expectedTarget: "generated/net/rukaruka966/parity/project.txt",
+  },
+  {
+    blueprint: "api-spring-postgres",
+    basePackage: "net.rukaruka966.parity",
+    target: "generated/__BASE_PACKAGE_PATH__/project.txt",
+    expectedTarget: "generated/net/rukaruka966/parity/project.txt",
+  },
+]) {
+test(`${configuration.blueprint}: local and HTTP Blueprint sources generate identical paths and bytes`, async () => {
   const fixtureRoot = await mkdtemp(path.join(tmpdir(), "ibuki-parity-"));
   const localRoot = path.join(fixtureRoot, "local");
   const remoteRoot = path.join(fixtureRoot, "remote");
-  const blueprintRoot = path.join(localRoot, "blueprints", "web-hono");
+  const blueprintRoot = path.join(
+    localRoot,
+    "blueprints",
+    configuration.blueprint,
+  );
   const localDestination = path.join(fixtureRoot, "local-output");
   const remoteDestination = path.join(fixtureRoot, "remote-output");
   const corruptDestination = path.join(fixtureRoot, "corrupt-output");
@@ -113,8 +141,8 @@ test("local and HTTP Blueprint sources generate identical bytes", async () => {
   );
   const binary = Buffer.from([0x00, 0xff, 0x0d, 0x0a, 0x7f]);
   const manifest = {
-    schemaVersion: 3,
-    id: "web-hono",
+    schemaVersion: 4,
+    id: configuration.blueprint,
     version: "test",
     displayName: "Parity fixture",
     projectRequirements: [
@@ -137,8 +165,9 @@ test("local and HTTP Blueprint sources generate identical bytes", async () => {
       {
         kind: "text",
         source: "template/project.txt.tpl",
-        target: "project.txt",
+        target: configuration.target,
         template: true,
+        ...(configuration.basePackage ? { targetTemplate: true } : {}),
       },
       {
         kind: "binary",
@@ -168,9 +197,12 @@ test("local and HTTP Blueprint sources generate identical bytes", async () => {
       `${repositoryApiPath}/commits/v0.5.0`,
       Buffer.from(`${JSON.stringify({ sha: immutableCommit })}\n`, "utf8"),
     ],
-    ["/blueprints/web-hono/manifest.json", manifestBytes],
-    ["/blueprints/web-hono/template/project.txt.tpl", text],
-    ["/blueprints/web-hono/template/asset.bin", binary],
+    [`/blueprints/${configuration.blueprint}/manifest.json`, manifestBytes],
+    [
+      `/blueprints/${configuration.blueprint}/template/project.txt.tpl`,
+      text,
+    ],
+    [`/blueprints/${configuration.blueprint}/template/asset.bin`, binary],
   ]);
   const requestedUrls = [];
   const server = createServer((request, response) => {
@@ -236,6 +268,7 @@ test("local and HTTP Blueprint sources generate identical bytes", async () => {
       path.join(localRoot, "bootstrap.ps1"),
       localDestination,
       localRoot,
+      configuration,
     );
     assert.equal(localResult.code, 0, localResult.output);
 
@@ -243,6 +276,7 @@ test("local and HTTP Blueprint sources generate identical bytes", async () => {
       remoteBootstrap,
       remoteDestination,
       remoteRoot,
+      configuration,
     );
     assert.equal(remoteResult.code, 0, remoteResult.output);
     assert.equal(
@@ -262,18 +296,21 @@ test("local and HTTP Blueprint sources generate identical bytes", async () => {
       assert.deepEqual(remoteTree.get(relativePath), localBytes, relativePath);
     }
     assert.equal(
-      localTree.get("project.txt").toString("utf8"),
+      localTree
+        .get(configuration.expectedTarget ?? configuration.target)
+        .toString("utf8"),
       "project=parity-project\nbootstrap=0.5.0\n",
     );
 
     routes.set(
-      "/blueprints/web-hono/template/asset.bin",
+      `/blueprints/${configuration.blueprint}/template/asset.bin`,
       Buffer.from([0x01, 0xff, 0x0d, 0x0a, 0x7f]),
     );
     const corruptResult = await runPowerShell(
       remoteBootstrap,
       corruptDestination,
       remoteRoot,
+      configuration,
     );
     assert.notEqual(corruptResult.code, 0);
     assert.match(corruptResult.output, /binary checksum mismatch/);
@@ -283,3 +320,4 @@ test("local and HTTP Blueprint sources generate identical bytes", async () => {
     await rm(fixtureRoot, { recursive: true, force: true });
   }
 });
+}

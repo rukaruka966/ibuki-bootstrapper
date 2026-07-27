@@ -22,7 +22,7 @@ const repositoryRoot = path.resolve(
 
 function createManifest(file) {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     id: "web-hono",
     version: "test",
     displayName: "Manifest test",
@@ -46,9 +46,13 @@ function createManifest(file) {
   };
 }
 
-async function runInvalidManifest(manifest, source = Buffer.from("source\n")) {
-  const fixtureRoot = await mkdtemp(path.join(tmpdir(), "ibuki-manifest-v3-"));
-  const blueprintRoot = path.join(fixtureRoot, "blueprints", "web-hono");
+async function runInvalidManifest(
+  manifest,
+  source = Buffer.from("source\n"),
+  basePackage = "net.rukaruka966.manifesttest",
+) {
+  const fixtureRoot = await mkdtemp(path.join(tmpdir(), "ibuki-manifest-v4-"));
+  const blueprintRoot = path.join(fixtureRoot, "blueprints", manifest.id);
   const sourcePath = path.join(blueprintRoot, "template", "source.bin");
   const destination = path.join(fixtureRoot, "destination");
   const bootstrapPath = path.join(fixtureRoot, "bootstrap.ps1");
@@ -66,14 +70,12 @@ async function runInvalidManifest(manifest, source = Buffer.from("source\n")) {
     );
     await writeFile(sourcePath, source);
 
-    const result = spawnSync(
-      "pwsh",
-      [
+    const args = [
         "-NoProfile",
         "-File",
         bootstrapPath,
         "-Blueprint",
-        "web-hono",
+        manifest.id,
         "-ProjectId",
         "manifest-test",
         "-Destination",
@@ -81,7 +83,15 @@ async function runInvalidManifest(manifest, source = Buffer.from("source\n")) {
         "-SkipGitHub",
         "-NonInteractive",
         "-Yes",
-      ],
+    ];
+
+    if (manifest.id.startsWith("api-spring")) {
+      args.push("-BasePackage", basePackage);
+    }
+
+    const result = spawnSync(
+      "pwsh",
+      args,
       {
         cwd: fixtureRoot,
         encoding: "utf8",
@@ -100,9 +110,11 @@ async function runValidManifest(
   manifest,
   source = Buffer.from("source\n"),
   displayName = "Manifest test",
+  expectedTarget = "source.txt",
+  basePackage = "net.rukaruka966.manifesttest",
 ) {
-  const fixtureRoot = await mkdtemp(path.join(tmpdir(), "ibuki-manifest-v3-ok-"));
-  const blueprintRoot = path.join(fixtureRoot, "blueprints", "web-hono");
+  const fixtureRoot = await mkdtemp(path.join(tmpdir(), "ibuki-manifest-v4-ok-"));
+  const blueprintRoot = path.join(fixtureRoot, "blueprints", manifest.id);
   const sourcePath = path.join(blueprintRoot, "template", "source.bin");
   const destination = path.join(fixtureRoot, "destination");
   const bootstrapPath = path.join(fixtureRoot, "bootstrap.ps1");
@@ -120,14 +132,12 @@ async function runValidManifest(
     );
     await writeFile(sourcePath, source);
 
-    const result = spawnSync(
-      "pwsh",
-      [
+    const args = [
         "-NoProfile",
         "-File",
         bootstrapPath,
         "-Blueprint",
-        "web-hono",
+        manifest.id,
         "-ProjectId",
         "manifest-test",
         "-DisplayName",
@@ -137,7 +147,15 @@ async function runValidManifest(
         "-SkipGitHub",
         "-NonInteractive",
         "-Yes",
-      ],
+    ];
+
+    if (manifest.id.startsWith("api-spring")) {
+      args.push("-BasePackage", basePackage);
+    }
+
+    const result = spawnSync(
+      "pwsh",
+      args,
       {
         cwd: fixtureRoot,
         encoding: "utf8",
@@ -148,7 +166,7 @@ async function runValidManifest(
 
     assert.equal(result.status, 0, output);
     const generatedContent = await readFile(
-      path.join(destination, "source.txt"),
+      path.join(destination, expectedTarget),
       "utf8",
     );
     return { output, generatedContent };
@@ -205,6 +223,123 @@ test("token-like display names are inserted once without being reinterpreted", a
   assert.equal(
     generatedContent,
     "name=Literal __PROJECT_ID__ and __HELLO__\nid=manifest-test\n",
+  );
+});
+
+test("Base Package target template renders a safe source path", async () => {
+  const manifest = createManifest({
+    kind: "text",
+    source: "template/source.bin",
+    target: "src/main/kotlin/__BASE_PACKAGE_PATH__/Application.kt",
+    template: true,
+    targetTemplate: true,
+  });
+  manifest.id = "api-spring";
+
+  const { generatedContent } = await runValidManifest(
+    manifest,
+    Buffer.from("package __BASE_PACKAGE__\n"),
+    "Manifest test",
+    "src/main/kotlin/net/rukaruka966/manifesttest/Application.kt",
+  );
+  assert.equal(generatedContent, "package net.rukaruka966.manifesttest\n");
+});
+
+test("target templates reject unsupported tokens and non-boolean flags", async () => {
+  const unsupported = createManifest({
+    kind: "text",
+    source: "template/source.bin",
+    target: "src/__PROJECT_ID__/source.txt",
+    template: false,
+    targetTemplate: true,
+  });
+  unsupported.id = "api-spring";
+  assert.match(
+    await runInvalidManifest(unsupported),
+    /may only use __BASE_PACKAGE_PATH__/,
+  );
+
+  const nonBoolean = createManifest({
+    kind: "text",
+    source: "template/source.bin",
+    target: "src/__BASE_PACKAGE_PATH__/source.txt",
+    template: false,
+    targetTemplate: "yes",
+  });
+  nonBoolean.id = "api-spring";
+  assert.match(
+    await runInvalidManifest(nonBoolean),
+    /non-boolean targetTemplate/,
+  );
+});
+
+test("Base Package cannot inject an escaping or Windows-invalid target path", async () => {
+  const manifest = createManifest({
+    kind: "text",
+    source: "template/source.bin",
+    target: "src/__BASE_PACKAGE_PATH__/source.txt",
+    template: false,
+    targetTemplate: true,
+  });
+  manifest.id = "api-spring";
+
+  assert.match(
+    await runInvalidManifest(manifest, Buffer.from("source\n"), "net.safe.../CON"),
+    /Base package must contain/,
+  );
+});
+
+test("rendered targets reject duplicate, file-directory collision, and overlong paths", async () => {
+  const duplicate = createManifest({
+    kind: "text",
+    source: "template/source.bin",
+    target: "src/__BASE_PACKAGE_PATH__/source.txt",
+    template: false,
+    targetTemplate: true,
+  });
+  duplicate.id = "api-spring";
+  duplicate.files.push({
+    kind: "text",
+    source: "template/source.bin",
+    target: "src/net/rukaruka966/manifesttest/source.txt",
+    template: false,
+  });
+  assert.match(
+    await runInvalidManifest(duplicate),
+    /Rendered Blueprint contains a duplicate target/,
+  );
+
+  const collision = createManifest({
+    kind: "text",
+    source: "template/source.bin",
+    target: "src/__BASE_PACKAGE_PATH__",
+    template: false,
+    targetTemplate: true,
+  });
+  collision.id = "api-spring";
+  collision.files.push({
+    kind: "text",
+    source: "template/source.bin",
+    target: "src/net/rukaruka966/manifesttest/child.txt",
+    template: false,
+  });
+  assert.match(
+    await runInvalidManifest(collision),
+    /Rendered Blueprint targets have a file\/directory collision/,
+  );
+
+  const overlong = createManifest({
+    kind: "text",
+    source: "template/source.bin",
+    target: "src/__BASE_PACKAGE_PATH__/source.txt",
+    template: false,
+    targetTemplate: true,
+  });
+  overlong.id = "api-spring";
+  const longBasePackage = `net.rukaruka966.${Array(24).fill("abcdefghij").join(".")}`;
+  assert.match(
+    await runInvalidManifest(overlong, Buffer.from("source\n"), longBasePackage),
+    /Rendered Blueprint target path is too long/,
   );
 });
 
@@ -267,7 +402,7 @@ test("legacy schema is rejected before the destination is created", async () => 
 
   assert.match(
     await runInvalidManifest(manifest),
-    /must use schemaVersion 3/,
+    /must use schemaVersion 4/,
   );
 });
 
@@ -293,10 +428,10 @@ test("schema and argument types are validated without coercion", async () => {
     target: "source.txt",
     template: false,
   });
-  stringSchema.schemaVersion = "3";
+  stringSchema.schemaVersion = "4";
   assert.match(
     await runInvalidManifest(stringSchema),
-    /must use schemaVersion 3/,
+    /must use schemaVersion 4/,
   );
 
   const scalarArguments = createManifest({
@@ -381,8 +516,8 @@ test("binary checksum mismatch leaves the destination absent", async () => {
 });
 
 test("a reparse-point Blueprint root is rejected before manifest execution", async () => {
-  const fixtureRoot = await mkdtemp(path.join(tmpdir(), "ibuki-reparse-v3-"));
-  const externalRoot = await mkdtemp(path.join(tmpdir(), "ibuki-external-v3-"));
+  const fixtureRoot = await mkdtemp(path.join(tmpdir(), "ibuki-reparse-v4-"));
+  const externalRoot = await mkdtemp(path.join(tmpdir(), "ibuki-external-v4-"));
   const linkedBlueprint = path.join(
     fixtureRoot,
     "blueprints",
