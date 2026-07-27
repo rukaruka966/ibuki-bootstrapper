@@ -22,6 +22,13 @@ const repositoryRoot = path.resolve(
   "..",
 );
 const bootstrapPath = path.join(repositoryRoot, "bootstrap.ps1");
+const powerShellPath = spawnSync(
+  process.platform === "win32" ? "where.exe" : "which",
+  ["pwsh"],
+  { encoding: "utf8" },
+).stdout
+  .trim()
+  .split(/\r?\n/)[0];
 const silentLogger = {
   log() {},
 };
@@ -52,11 +59,23 @@ function runWithMockedGitHubApi({
   releaseCommit,
   releaseTag = "v0.3.0",
   fail = false,
+  rateLimited = false,
+  ghFallback = false,
+  ghAvailable = true,
+  hideGitHubCli = false,
   input = "q\n",
 }) {
   const escapedBootstrapPath = bootstrapPath.replaceAll("'", "''");
-  const mockBody = fail
-    ? 'throw "GitHub API unavailable"'
+  const mockBody = rateLimited
+    ? `
+      $exception = [System.Exception]::new("GitHub API rate limit exceeded")
+      $exception.Data["StatusCode"] = 403
+      $exception.Data["RateLimitRemaining"] = "0"
+      $exception.Data["RateLimitReset"] = "1785163531"
+      throw $exception
+    `
+    : fail
+      ? 'throw "GitHub API unavailable"'
     : `
       if ($Uri -like "*/commits/main") {
           return [PSCustomObject]@{ sha = "${mainCommit}" }
@@ -69,17 +88,59 @@ function runWithMockedGitHubApi({
       }
       throw "Unexpected URI: $Uri"
     `;
+  const mockGitHubCli = ghAvailable ? `
+    function gh {
+        [CmdletBinding()]
+        param(
+            [Parameter(ValueFromRemainingArguments = $true)]
+            [object[]]$Arguments
+        )
+
+        if (-not $${ghFallback}) {
+            Write-Error "gho_test_secret_must_not_leak" -ErrorAction Continue
+            $global:LASTEXITCODE = 1
+            return
+        }
+
+        $endpoint = [string]$Arguments[-1]
+        $global:LASTEXITCODE = 0
+
+        if ($endpoint -like "*/commits/main") {
+            return '{"sha":"${mainCommit}"}'
+        }
+        if ($endpoint -like "*/releases/latest") {
+            return '{"tag_name":"${releaseTag}"}'
+        }
+        if ($endpoint -like "*/commits/*") {
+            return '{"sha":"${releaseCommit}"}'
+        }
+
+        $global:LASTEXITCODE = 1
+    }
+  ` : "";
   const command = `
     function Invoke-RestMethod {
         param([string]$Uri, [hashtable]$Headers)
         ${mockBody}
     }
+    ${mockGitHubCli}
     Invoke-Expression (Get-Content -Raw -LiteralPath '${escapedBootstrapPath}')
   `;
 
-  return spawnSync("pwsh", ["-NoProfile", "-Command", command], {
+  const environment = hideGitHubCli
+    ? Object.fromEntries(
+      Object.entries(process.env)
+        .filter(([name]) => name.toLowerCase() !== "path"),
+    )
+    : process.env;
+  if (hideGitHubCli) {
+    environment.PATH = "";
+  }
+
+  return spawnSync(powerShellPath, ["-NoProfile", "-Command", command], {
     cwd: repositoryRoot,
     encoding: "utf8",
+    env: environment,
     input,
     timeout: 30_000,
   });
@@ -515,7 +576,43 @@ test("remote metadata identifies a released main commit", () => {
   assert.match(output, /Release\/Tag : v0\.3\.0/);
   assert.match(output, /Commit ID\s+: 1234567890ab/);
   assert.match(output, /Channel\s+: main/);
+  assert.doesNotMatch(output, /gho_test_secret_must_not_leak/);
   assert.match(output, /Cancelled\./);
+});
+
+test("anonymous metadata does not require GitHub CLI", () => {
+  const commit = "1234567890abcdef1234567890abcdef12345678";
+  const result = runWithMockedGitHubApi({
+    mainCommit: commit,
+    releaseCommit: commit,
+    ghAvailable: false,
+    hideGitHubCli: true,
+  });
+  const output = `${result.stdout}\n${result.stderr}`;
+
+  assert.equal(result.status, 0, output);
+  assert.match(output, /Release\/Tag : v0\.3\.0/);
+  assert.match(output, /Commit ID\s+: 1234567890ab/);
+  assert.doesNotMatch(output, /GitHub CLI fallback/);
+});
+
+test("rate-limited metadata uses authenticated GitHub CLI without exposing secrets", () => {
+  const commit = "1234567890abcdef1234567890abcdef12345678";
+  const result = runWithMockedGitHubApi({
+    mainCommit: commit,
+    releaseCommit: commit,
+    rateLimited: true,
+    ghFallback: true,
+  });
+  const output = `${result.stdout}\n${result.stderr}`;
+
+  assert.equal(result.status, 0, output);
+  assert.match(output, /Release\/Tag : v0\.3\.0/);
+  assert.match(output, /Commit ID\s+: 1234567890ab/);
+  assert.match(output, /Anonymous GitHub API rate limit exceeded/);
+  assert.match(output, /Retry after \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/);
+  assert.match(output, /Used authenticated GitHub CLI fallback/);
+  assert.doesNotMatch(output, /gho_test_secret_must_not_leak/);
 });
 
 test("remote metadata marks main ahead of the latest release", () => {
@@ -557,6 +654,8 @@ test("release metadata lookup failure is non-blocking", () => {
   assert.equal(result.status, 0, output);
   assert.match(output, /Release\/Tag : unavailable/);
   assert.match(output, /Commit ID\s+: unavailable/);
+  assert.match(output, /Authenticated GitHub CLI fallback failed or is not logged in/);
+  assert.doesNotMatch(output, /gho_test_secret_must_not_leak/);
   assert.match(output, /Cancelled\./);
 });
 
@@ -588,6 +687,22 @@ test("remote Blueprint retrieval fails closed without an immutable commit", () =
   assert.doesNotMatch(output, /\[Generate\]/);
 });
 
+test("rate limit diagnostics survive fail-closed Blueprint retrieval", () => {
+  const result = runWithMockedGitHubApi({
+    rateLimited: true,
+    ghFallback: false,
+    input: "1\nimmutable-rate-limit-test\n\n\nn\n",
+  });
+  const output = `${result.stdout}\n${result.stderr}`;
+
+  assert.notEqual(result.status, 0);
+  assert.match(output, /Anonymous GitHub API rate limit exceeded/);
+  assert.match(output, /Retry after \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/);
+  assert.match(output, /Unable to resolve an immutable Bootstrapper commit/);
+  assert.doesNotMatch(output, /gho_test_secret_must_not_leak/);
+  assert.doesNotMatch(output, /\[Generate\]/);
+});
+
 test("standalone script also fails closed without an immutable commit", async () => {
   const fixtureRoot = await mkdtemp(
     path.join(os.tmpdir(), "ibuki-standalone-pin-"),
@@ -601,6 +716,7 @@ test("standalone script also fails closed without an immutable commit", async ()
     await copyFile(bootstrapPath, scriptPath);
     const command = [
       "function Invoke-RestMethod { throw 'GitHub API unavailable' }",
+      "function gh { $global:LASTEXITCODE = 1 }",
       `& '${escapedScriptPath}' -Blueprint web-hono -ProjectId standalone-pin-test -Destination '${escapedDestination}' -SkipGitHub -NonInteractive -Yes`,
     ].join("\n");
     const result = spawnSync("pwsh", ["-NoProfile", "-Command", command], {
