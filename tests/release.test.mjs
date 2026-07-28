@@ -61,6 +61,7 @@ function runWithMockedGitHubApi({
   fail = false,
   rateLimited = false,
   ghFallback = false,
+  ghReleaseFail = false,
   ghAvailable = true,
   hideGitHubCli = false,
   input = "q\n",
@@ -105,6 +106,10 @@ function runWithMockedGitHubApi({
         $endpoint = [string]$Arguments[-1]
         $global:LASTEXITCODE = 0
 
+        if ($${ghReleaseFail} -and $endpoint -like "*/releases/latest") {
+            $global:LASTEXITCODE = 1
+            return
+        }
         if ($endpoint -like "*/commits/main") {
             return '{"sha":"${mainCommit}"}'
         }
@@ -612,6 +617,25 @@ test("rate-limited metadata uses authenticated GitHub CLI without exposing secre
   assert.match(output, /Anonymous GitHub API rate limit exceeded/);
   assert.match(output, /Retry after \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/);
   assert.match(output, /Used authenticated GitHub CLI fallback/);
+  assert.doesNotMatch(output, /gho_test_secret_must_not_leak/);
+});
+
+test("later release failure preserves its diagnostic after authenticated fallback", () => {
+  const commit = "1234567890abcdef1234567890abcdef12345678";
+  const result = runWithMockedGitHubApi({
+    mainCommit: commit,
+    releaseCommit: commit,
+    rateLimited: true,
+    ghFallback: true,
+    ghReleaseFail: true,
+  });
+  const output = `${result.stdout}\n${result.stderr}`;
+
+  assert.equal(result.status, 0, output);
+  assert.match(output, /Release\/Tag : unavailable/);
+  assert.match(output, /Commit ID\s+: 1234567890ab/);
+  assert.match(output, /Used authenticated GitHub CLI fallback/);
+  assert.match(output, /Authenticated GitHub CLI fallback failed/);
   assert.doesNotMatch(output, /gho_test_secret_must_not_leak/);
 });
 

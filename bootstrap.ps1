@@ -545,7 +545,14 @@ function Get-RemoteReleaseMetadata {
     }
 
     if (-not [string]::IsNullOrWhiteSpace($state.RemoteMetadataDiagnostic)) {
-        $diagnostic = $state.RemoteMetadataDiagnostic
+        if (
+            -not [string]::IsNullOrWhiteSpace($diagnostic) -and
+            $diagnostic -ne $state.RemoteMetadataDiagnostic
+        ) {
+            $diagnostic = "$($state.RemoteMetadataDiagnostic) $diagnostic"
+        } else {
+            $diagnostic = $state.RemoteMetadataDiagnostic
+        }
     }
 
     return [PSCustomObject]@{
