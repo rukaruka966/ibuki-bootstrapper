@@ -49,6 +49,8 @@ $state = [PSCustomObject]@{
     BootstrapperRepository = "rukaruka966/ibuki-bootstrapper"
     RawBaseUrl = "https://raw.githubusercontent.com/rukaruka966/ibuki-bootstrapper/main"
     BlueprintRevision = "main"
+    UseAuthenticatedGitHubApi = $false
+    RemoteMetadataDiagnostic = ""
     CreatedFiles = [System.Collections.Generic.List[string]]::new()
     CreatedRepository = ""
     CurrentPhase = "Start"
@@ -315,24 +317,194 @@ function Get-LocalReleaseMetadata {
         Channel = $branch
         Version = ConvertTo-BootstrapperVersion -Tag $releaseTag
         IsLocal = $true
+        Diagnostic = ""
     }
 }
 
-function Get-RemoteReleaseMetadata {
-    $apiBaseUrl = "https://api.github.com/repos/$($state.BootstrapperRepository)"
+function Get-GitHubResponseHeader {
+    param(
+        [object]$Headers,
+
+        [Parameter(Mandatory)]
+        [string]$Name
+    )
+
+    if ($null -eq $Headers) {
+        return ""
+    }
+
+    try {
+        $values = @($Headers.GetValues($Name))
+
+        if ($values.Count -gt 0) {
+            return [string]$values[0]
+        }
+    } catch {
+        try {
+            return [string]$Headers[$Name]
+        } catch {
+            return ""
+        }
+    }
+
+    return ""
+}
+
+function Get-GitHubApiFailureDiagnostic {
+    param(
+        [Parameter(Mandatory)]
+        [object]$ErrorRecord
+    )
+
+    $exception = $ErrorRecord.Exception
+    $response = if (@($exception.PSObject.Properties.Name) -contains "Response") {
+        $exception.Response
+    } else {
+        $null
+    }
+    $statusCode = if ($null -ne $response) {
+        try {
+            [int]$response.StatusCode
+        } catch {
+            0
+        }
+    } else {
+        0
+    }
+    if (
+        $statusCode -eq 0 -and
+        $null -ne $exception.Data -and
+        $exception.Data.Contains("StatusCode")
+    ) {
+        $statusCode = [int]$exception.Data["StatusCode"]
+    }
+    $remaining = if ($null -ne $response) {
+        Get-GitHubResponseHeader -Headers $response.Headers -Name "X-RateLimit-Remaining"
+    } elseif (
+        $null -ne $exception.Data -and
+        $exception.Data.Contains("RateLimitRemaining")
+    ) {
+        [string]$exception.Data["RateLimitRemaining"]
+    } else {
+        ""
+    }
+
+    if ($statusCode -eq 403 -and $remaining -eq "0") {
+        $resetValue = if ($null -ne $response) {
+            Get-GitHubResponseHeader `
+                -Headers $response.Headers `
+                -Name "X-RateLimit-Reset"
+        } elseif (
+            $null -ne $exception.Data -and
+            $exception.Data.Contains("RateLimitReset")
+        ) {
+            [string]$exception.Data["RateLimitReset"]
+        } else {
+            ""
+        }
+        $retryText = ""
+        $resetSeconds = [long]0
+
+        if ([long]::TryParse($resetValue, [ref]$resetSeconds)) {
+            $resetTime = [DateTimeOffset]::FromUnixTimeSeconds($resetSeconds).ToLocalTime()
+            $retryText = " Retry after $($resetTime.ToString('yyyy-MM-dd HH:mm:ss zzz'))."
+        }
+
+        return "Anonymous GitHub API rate limit exceeded.$retryText"
+    }
+
+    if ($statusCode -gt 0) {
+        return "Anonymous GitHub API request failed (HTTP $statusCode)."
+    }
+
+    return "Anonymous GitHub API request failed."
+}
+
+function Invoke-AuthenticatedGitHubApi {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Endpoint
+    )
+
+    if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
+        throw "GitHub CLI fallback is unavailable."
+    }
+
+    $output = & gh api `
+        --hostname github.com `
+        --method GET `
+        -H "Accept: application/vnd.github+json" `
+        -H "X-GitHub-Api-Version: 2026-03-10" `
+        $Endpoint `
+        2>$null
+    $exitCode = $LASTEXITCODE
+    $json = ($output -join "`n").Trim()
+
+    if ($exitCode -ne 0 -or [string]::IsNullOrWhiteSpace($json)) {
+        throw "Authenticated GitHub CLI fallback failed."
+    }
+
+    try {
+        return ($json | ConvertFrom-Json)
+    } catch {
+        throw "Authenticated GitHub CLI fallback returned invalid JSON."
+    }
+}
+
+function Invoke-RemoteGitHubApi {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Endpoint
+    )
+
+    if ($state.UseAuthenticatedGitHubApi) {
+        return Invoke-AuthenticatedGitHubApi -Endpoint $Endpoint
+    }
+
     $headers = @{
         Accept = "application/vnd.github+json"
         "User-Agent" = "Ibuki-Bootstrapper"
         "X-GitHub-Api-Version" = "2026-03-10"
     }
-    $fullCommitId = ""
+    $uri = "https://api.github.com/$Endpoint"
 
     try {
-        $commitInfo = Invoke-RestMethod `
-            -Uri "$apiBaseUrl/commits/main" `
-            -Headers $headers
-        $fullCommitId = [string]$commitInfo.sha
+        return Invoke-RestMethod -Uri $uri -Headers $headers
     } catch {
+        $anonymousDiagnostic = Get-GitHubApiFailureDiagnostic -ErrorRecord $_
+    }
+
+    try {
+        $result = Invoke-AuthenticatedGitHubApi -Endpoint $Endpoint
+        $state.UseAuthenticatedGitHubApi = $true
+        $state.RemoteMetadataDiagnostic = (
+            "$anonymousDiagnostic Used authenticated GitHub CLI fallback."
+        )
+        return $result
+    } catch {
+        $fallbackDiagnostic = if (Get-Command gh -ErrorAction SilentlyContinue) {
+            "Authenticated GitHub CLI fallback failed or is not logged in."
+        } else {
+            "GitHub CLI fallback is unavailable."
+        }
+        throw "$anonymousDiagnostic $fallbackDiagnostic"
+    }
+}
+
+function Get-RemoteReleaseMetadata {
+    $apiBasePath = "repos/$($state.BootstrapperRepository)"
+    $fullCommitId = ""
+    $diagnostic = $state.RemoteMetadataDiagnostic
+
+    try {
+        $commitInfo = Invoke-RemoteGitHubApi -Endpoint "$apiBasePath/commits/main"
+        $fullCommitId = [string]$commitInfo.sha
+
+        if ($fullCommitId -notmatch '^[0-9a-f]{40}$') {
+            throw "GitHub metadata returned an invalid main Commit SHA."
+        }
+    } catch {
+        $diagnostic = $_.Exception.Message
         return [PSCustomObject]@{
             ReleaseTag = "unavailable"
             CommitId = "unavailable"
@@ -340,21 +512,27 @@ function Get-RemoteReleaseMetadata {
             Channel = "main"
             Version = "unavailable"
             IsLocal = $false
+            Diagnostic = $diagnostic
         }
     }
 
     $releaseTag = "unavailable"
 
     try {
-        $latestRelease = Invoke-RestMethod `
-            -Uri "$apiBaseUrl/releases/latest" `
-            -Headers $headers
+        $latestRelease = Invoke-RemoteGitHubApi -Endpoint "$apiBasePath/releases/latest"
         $latestTag = [string]$latestRelease.tag_name
+
+        if ($latestTag -notmatch '^v\d+\.\d+\.\d+$') {
+            throw "GitHub metadata returned an invalid Release Tag."
+        }
+
         $encodedTag = [uri]::EscapeDataString($latestTag)
-        $tagCommit = Invoke-RestMethod `
-            -Uri "$apiBaseUrl/commits/$encodedTag" `
-            -Headers $headers
+        $tagCommit = Invoke-RemoteGitHubApi -Endpoint "$apiBasePath/commits/$encodedTag"
         $tagCommitId = [string]$tagCommit.sha
+
+        if ($tagCommitId -notmatch '^[0-9a-f]{40}$') {
+            throw "GitHub metadata returned an invalid Release Commit SHA."
+        }
 
         $releaseTag = if ($tagCommitId -eq $fullCommitId) {
             $latestTag
@@ -362,7 +540,19 @@ function Get-RemoteReleaseMetadata {
             "Unreleased (latest: $latestTag)"
         }
     } catch {
+        $diagnostic = $_.Exception.Message
         $releaseTag = "unavailable"
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($state.RemoteMetadataDiagnostic)) {
+        if (
+            -not [string]::IsNullOrWhiteSpace($diagnostic) -and
+            $diagnostic -ne $state.RemoteMetadataDiagnostic
+        ) {
+            $diagnostic = "$($state.RemoteMetadataDiagnostic) $diagnostic"
+        } else {
+            $diagnostic = $state.RemoteMetadataDiagnostic
+        }
     }
 
     return [PSCustomObject]@{
@@ -372,6 +562,7 @@ function Get-RemoteReleaseMetadata {
         Channel = "main"
         Version = ConvertTo-BootstrapperVersion -Tag $releaseTag
         IsLocal = $false
+        Diagnostic = $diagnostic
     }
 }
 
@@ -398,6 +589,11 @@ function Write-BootstrapReleaseMetadata {
     Write-Host "Commit ID   : $($Metadata.CommitId)"
     Write-Host "Channel     : $($Metadata.Channel)"
     Write-Host "Source      : $($state.BootstrapperRepository)"
+
+    if (-not [string]::IsNullOrWhiteSpace($Metadata.Diagnostic)) {
+        Write-Host "Metadata    : $($Metadata.Diagnostic)" -ForegroundColor Yellow
+    }
+
     Write-Host "------------------------------------------------------------"
 }
 
@@ -2188,7 +2384,15 @@ function Invoke-IbukiBootstrap {
         }
 
         if ([string]::IsNullOrWhiteSpace($releaseMetadata.FullCommitId)) {
-            throw "Unable to resolve an immutable Bootstrapper commit for Blueprint retrieval."
+            $diagnostic = if ([string]::IsNullOrWhiteSpace($releaseMetadata.Diagnostic)) {
+                ""
+            } else {
+                " $($releaseMetadata.Diagnostic)"
+            }
+            throw (
+                "Unable to resolve an immutable Bootstrapper commit for Blueprint retrieval." +
+                $diagnostic
+            )
         }
 
         $state.BlueprintRevision = $releaseMetadata.FullCommitId
