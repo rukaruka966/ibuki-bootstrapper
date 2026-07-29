@@ -31,5 +31,22 @@ Build成果物の規則をnested `.gitignore`で所有します。たとえば
 security boundaryではありません。SecretはRepository外で管理し、Commit前に
 staging内容を確認してください。
 
+## Issueの受け付け
+
+人間は観測結果と期待結果を伝えます。GitHub Issueを使用する場合、AI Agentは
+実装前に、対象範囲、対象外、観測可能な受け入れ条件、依頼固有の制約と停止条件、
+検証計画をIssueへ追記し、実装可能な作業契約にします。
+
+## Pull Requestの引き継ぎ
+
+Pull Request templateは、AIによる実装と人間による受け入れ確認の引き継ぎ契約として
+使用します。AIの実装、検証、Reviewが完了していれば、`develop`向けPull Requestの
+人間による受け入れ状態は`Pending`のままでも構いません。ただし、人間が確認する操作と
+期待結果を明記します。`develop`から`main`へのPull Requestでは、受け入れ状態を
+`Accepted`とし、確認結果または証跡を記録します。
+
+採用した判断、依頼との差異、検証証跡、Review結果、発生した停止条件を記録してください。
+次の判断に使われない形式的なChecklistは増やしません。
+
 `main`のQuality成功後、semantic-releaseがConventional CommitからRelease Notes、
 Git Tag、GitHub Releaseを作成します。CHANGELOGファイルを更新するCommitは作りません。

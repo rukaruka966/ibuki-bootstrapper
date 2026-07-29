@@ -39,6 +39,15 @@ Repositoryルートのpnpmから、同梱のGradle Wrapperを呼び出します�
 - 明示的な要件なしにDatabase、認証、Docker、OpenAPIを追加しない。
 - Secretやローカル絶対パスを記録しない。
 
+## AIと人間の引き継ぎ
+
+- 人間は観測結果と期待結果を伝え、受け入れ確認を行います。
+- GitHub Issueを使用する場合、AI Agentは実装前に、対象範囲、対象外、受け入れ条件、
+  制約と停止条件、検証計画をIssueへ追記し、実装可能な作業契約にします。
+- AI Agentは実装、検証、Review、Pull Requestの証跡を担当します。
+- `develop`では受け入れ状態を`Pending`にできますが、`main`へ進めるには
+  `Accepted`の確認結果または証跡が必要です。
+
 ## 完了条件
 
 - `pnpm check`と`pnpm build`が成功する。
