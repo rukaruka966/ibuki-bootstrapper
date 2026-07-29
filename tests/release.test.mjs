@@ -569,6 +569,23 @@ test("release workflow waits for Quality and has minimal write permission", asyn
   assert.match(workflow, /run: pnpm run release/);
 });
 
+test("Quality fetches release tags for generated project provenance", async () => {
+  const workflow = await readFile(
+    path.join(repositoryRoot, ".github", "workflows", "ci.yml"),
+    "utf8",
+  );
+  const qualityStart = workflow.indexOf("  quality:");
+  const releaseStart = workflow.indexOf("  release:");
+
+  assert.ok(qualityStart >= 0);
+  assert.ok(releaseStart > qualityStart);
+
+  const qualityJob = workflow.slice(qualityStart, releaseStart);
+
+  assert.match(qualityJob, /uses: actions\/checkout@v6/);
+  assert.match(qualityJob, /fetch-depth: 0/);
+});
+
 test("remote metadata identifies a released main commit", () => {
   const commit = "1234567890abcdef1234567890abcdef12345678";
   const result = runWithMockedGitHubApi({
