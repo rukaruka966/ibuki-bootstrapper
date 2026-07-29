@@ -7,6 +7,7 @@
   "recommendedCommands": [],
   "fileSets": [],
   "files": [
+    { "kind": "text", "source": "template/systems/api-server/.gitignore.tpl", "target": "systems/api-server/.gitignore", "template": false },
     { "kind": "text", "source": "template/scripts/run-gradle.mjs.tpl", "target": "scripts/run-gradle.mjs", "template": false }
   ]
 }

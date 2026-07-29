@@ -7,6 +7,7 @@
   "recommendedCommands": [],
   "fileSets": [],
   "files": [
+    { "kind": "text", "source": "template/.gitignore.tpl", "target": ".gitignore", "template": false },
     { "kind": "text", "source": "template/.github/workflows/release.yml.tpl", "target": ".github/workflows/release.yml", "template": false },
     { "kind": "text", "source": "template/docs/REPOSITORY_OPERATIONS.md.tpl", "target": "docs/REPOSITORY_OPERATIONS.md", "template": false },
     { "kind": "text", "source": "template/docs/ja-JP/REPOSITORY_OPERATIONS-ja.md.tpl", "target": "docs/ja-JP/REPOSITORY_OPERATIONS-ja.md", "template": false },

@@ -48,7 +48,6 @@
   "fileSets": ["repository", "spring-gradle"],
   "files": [
     { "source": "template/.gitattributes.tpl", "target": ".gitattributes", "kind": "text", "template": false },
-    { "source": "template/.gitignore.tpl", "target": ".gitignore", "kind": "text", "template": false },
     { "source": "template/AGENTS.md.tpl", "target": "AGENTS.md", "kind": "text", "template": true },
     { "source": "template/DESIGN.md.tpl", "target": "DESIGN.md", "kind": "text", "template": false },
     { "source": "template/README.md.tpl", "target": "README.md", "kind": "text", "template": true },
