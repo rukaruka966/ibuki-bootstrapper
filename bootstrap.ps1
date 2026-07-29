@@ -265,14 +265,14 @@ function Get-LocalReleaseMetadata {
         return $null
     }
 
-    $commit = & git -C $BootstrapRoot rev-parse HEAD 2>$null
+    $commit = & git --no-replace-objects -C $BootstrapRoot rev-parse HEAD 2>$null
 
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace(($commit -join ""))) {
         return $null
     }
 
     $fullCommitId = ($commit -join "").Trim()
-    $branch = (& git -C $BootstrapRoot branch --show-current 2>$null) -join ""
+    $branch = (& git --no-replace-objects -C $BootstrapRoot branch --show-current 2>$null) -join ""
 
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($branch)) {
         $branch = "local"
@@ -280,18 +280,18 @@ function Get-LocalReleaseMetadata {
         $branch = $branch.Trim()
     }
 
-    $workingTreeStatus = (& git -C $BootstrapRoot status --porcelain 2>$null) -join ""
+    $workingTreeStatus = (& git --no-replace-objects -C $BootstrapRoot status --porcelain 2>$null) -join ""
     $isWorkingTreeDirty = $LASTEXITCODE -ne 0 -or
         -not [string]::IsNullOrWhiteSpace($workingTreeStatus)
     $pointingTags = @(
-        & git -C $BootstrapRoot tag --points-at HEAD --list "v[0-9]*" 2>$null |
+        & git --no-replace-objects -C $BootstrapRoot tag --points-at HEAD --list "v[0-9]*" 2>$null |
             Where-Object { $_ -match '^v\d+\.\d+\.\d+$' } |
             Sort-Object { [version]($_.Substring(1)) } -Descending
     )
     $releaseTag = if ($pointingTags.Count -gt 0 -and -not $isWorkingTreeDirty) {
         $pointingTags[0]
     } else {
-        $latestTag = & git -C $BootstrapRoot describe `
+        $latestTag = & git --no-replace-objects -C $BootstrapRoot describe `
             --tags `
             --match "v[0-9]*" `
             --abbrev=0 `
@@ -317,6 +317,7 @@ function Get-LocalReleaseMetadata {
         FullCommitId = $fullCommitId
         Channel = $branch
         Version = ConvertTo-BootstrapperVersion -Tag $releaseTag
+        IsWorkingTreeDirty = $isWorkingTreeDirty
         IsLocal = $true
         Diagnostic = ""
     }
@@ -512,6 +513,7 @@ function Get-RemoteReleaseMetadata {
             FullCommitId = ""
             Channel = "main"
             Version = "unavailable"
+            IsWorkingTreeDirty = $false
             IsLocal = $false
             Diagnostic = $diagnostic
         }
@@ -562,6 +564,7 @@ function Get-RemoteReleaseMetadata {
         FullCommitId = $fullCommitId
         Channel = "main"
         Version = ConvertTo-BootstrapperVersion -Tag $releaseTag
+        IsWorkingTreeDirty = $false
         IsLocal = $false
         Diagnostic = $diagnostic
     }
@@ -575,6 +578,186 @@ function Get-BootstrapReleaseMetadata {
     }
 
     return Get-RemoteReleaseMetadata
+}
+
+function Get-CommittedBootstrapFileBytes {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$ExpectedCommit,
+        [Parameter(Mandatory)][string]$Label
+    )
+
+    if (
+        [string]::IsNullOrWhiteSpace($BootstrapRoot) -or
+        $ExpectedCommit -notmatch '^[0-9a-f]{40}$'
+    ) {
+        throw "Local Blueprint generation requires an immutable Bootstrapper commit."
+    }
+
+    $canonicalRoot = [System.IO.Path]::GetFullPath($BootstrapRoot)
+    $canonicalPath = [System.IO.Path]::GetFullPath($Path)
+    $rootPrefix = $canonicalRoot.TrimEnd(
+        [System.IO.Path]::DirectorySeparatorChar,
+        [System.IO.Path]::AltDirectorySeparatorChar
+    ) + [System.IO.Path]::DirectorySeparatorChar
+
+    if (-not $canonicalPath.StartsWith(
+        $rootPrefix,
+        [System.StringComparison]::OrdinalIgnoreCase
+    )) {
+        throw "Local $Label escapes the Bootstrapper repository."
+    }
+
+    $relativePath = [System.IO.Path]::GetRelativePath(
+        $canonicalRoot,
+        $canonicalPath
+    ).Replace("\", "/")
+    $gitCommand = Get-Command git -ErrorAction SilentlyContinue
+
+    if ($null -eq $gitCommand) {
+        throw "Local Blueprint generation requires a Git working tree."
+    }
+
+    $objectExpression = "${ExpectedCommit}:$relativePath"
+    $sizeOutput = (& git --no-replace-objects -C $canonicalRoot cat-file -s $objectExpression 2>$null) -join ""
+    $objectSize = [long]0
+
+    if (
+        $LASTEXITCODE -ne 0 -or
+        -not [long]::TryParse($sizeOutput.Trim(), [ref]$objectSize)
+    ) {
+        throw (
+            "Local $Label is not tracked by the recorded Bootstrapper commit: " +
+            "$relativePath."
+        )
+    }
+
+    if ($objectSize -gt $state.MaximumBlueprintSourceBytes) {
+        throw "Local $Label exceeds the committed source size limit."
+    }
+
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $gitCommand.Source
+    $startInfo.ArgumentList.Add("--no-replace-objects")
+    $startInfo.ArgumentList.Add("-C")
+    $startInfo.ArgumentList.Add($canonicalRoot)
+    $startInfo.ArgumentList.Add("cat-file")
+    $startInfo.ArgumentList.Add("blob")
+    $startInfo.ArgumentList.Add($objectExpression)
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $startInfo.UseShellExecute = $false
+    $process = [System.Diagnostics.Process]::Start($startInfo)
+    $stream = [System.IO.MemoryStream]::new()
+
+    try {
+        $process.StandardOutput.BaseStream.CopyTo($stream)
+        $errorOutput = $process.StandardError.ReadToEnd()
+        $process.WaitForExit()
+
+        if ($process.ExitCode -ne 0) {
+            throw (
+                "Local $Label is not tracked by the recorded Bootstrapper commit: " +
+                "$relativePath. $errorOutput"
+            )
+        }
+
+        return ,$stream.ToArray()
+    } finally {
+        $stream.Dispose()
+        $process.Dispose()
+    }
+}
+
+function Assert-LocalBootstrapFileMatchesCommit {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][byte[]]$Bytes,
+        [Parameter(Mandatory)][string]$ExpectedCommit,
+        [Parameter(Mandatory)][string]$Label
+    )
+
+    $expectedBytes = Get-CommittedBootstrapFileBytes `
+        -Path $Path `
+        -ExpectedCommit $ExpectedCommit `
+        -Label $Label
+    $matches = $Bytes.Length -eq $expectedBytes.Length
+
+    if ($matches) {
+        for ($index = 0; $index -lt $Bytes.Length; $index++) {
+            if ($Bytes[$index] -ne $expectedBytes[$index]) {
+                $matches = $false
+                break
+            }
+        }
+    }
+
+    if (-not $matches) {
+        throw "Local $Label differs from the recorded Bootstrapper commit."
+    }
+}
+
+function Assert-CleanLocalBootstrapRoot {
+    param([Parameter(Mandatory)][string]$ExpectedCommit)
+
+    if (
+        [string]::IsNullOrWhiteSpace($BootstrapRoot) -or
+        -not (Get-Command git -ErrorAction SilentlyContinue)
+    ) {
+        throw "Local Blueprint generation requires a Git working tree."
+    }
+
+    $head = (& git --no-replace-objects -C $BootstrapRoot rev-parse HEAD 2>$null) -join ""
+
+    if (
+        $LASTEXITCODE -ne 0 -or
+        $ExpectedCommit -notmatch '^[0-9a-f]{40}$' -or
+        -not $head.Trim().Equals(
+            $ExpectedCommit,
+            [System.StringComparison]::OrdinalIgnoreCase
+        )
+    ) {
+        throw (
+            "Local Blueprint generation requires the same immutable Bootstrapper " +
+            "commit throughout execution."
+        )
+    }
+
+    $status = (& git --no-replace-objects -C $BootstrapRoot status --porcelain 2>$null) -join "`n"
+
+    if (
+        $LASTEXITCODE -ne 0 -or
+        -not [string]::IsNullOrWhiteSpace($status)
+    ) {
+        throw (
+            "Local Blueprint generation requires a clean Bootstrapper working tree " +
+            "so project.config.yaml records reproducible provenance."
+        )
+    }
+
+    if (
+        [string]::IsNullOrWhiteSpace($InvocationPath) -or
+        -not (Test-Path -LiteralPath $InvocationPath -PathType Leaf)
+    ) {
+        throw "Local Blueprint generation cannot verify its Bootstrapper entry point."
+    }
+
+    $entryItem = Get-Item -LiteralPath $InvocationPath -Force
+
+    if (($entryItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "Local Bootstrapper entry point must not be a reparse point."
+    }
+
+    if ($entryItem.Length -gt $state.MaximumBlueprintSourceBytes) {
+        throw "Local Bootstrapper entry point exceeds the size limit."
+    }
+
+    $entryBytes = [System.IO.File]::ReadAllBytes($entryItem.FullName)
+    Assert-LocalBootstrapFileMatchesCommit `
+        -Path $entryItem.FullName `
+        -Bytes $entryBytes `
+        -ExpectedCommit $ExpectedCommit `
+        -Label "Bootstrapper entry point"
 }
 
 function Write-BootstrapReleaseMetadata {
@@ -1001,15 +1184,29 @@ function Get-BlueprintSourceBytes {
             -DestinationRoot $canonicalBlueprintRoot `
             -TargetParent (Split-Path -Parent $canonicalSource)
 
-        if (
-            (Get-Item -LiteralPath $canonicalSource).Attributes.HasFlag(
-                [System.IO.FileAttributes]::ReparsePoint
-            )
-        ) {
+        $sourceItem = Get-Item -LiteralPath $canonicalSource -Force
+
+        if (($sourceItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
             throw "Local blueprint source must not be a reparse point: $Source"
         }
 
-        return ,([System.IO.File]::ReadAllBytes($canonicalSource))
+        if ($sourceItem.Length -gt $state.MaximumBlueprintSourceBytes) {
+            throw "Blueprint source exceeds the per-file size limit: $Source"
+        }
+
+        $bytes = [System.IO.File]::ReadAllBytes($canonicalSource)
+
+        if ($bytes.Length -gt $state.MaximumBlueprintSourceBytes) {
+            throw "Blueprint source changed beyond the per-file size limit: $Source"
+        }
+
+        Assert-LocalBootstrapFileMatchesCommit `
+            -Path $canonicalSource `
+            -Bytes $bytes `
+            -ExpectedCommit $state.BootstrapperCommit `
+            -Label "Blueprint source '$Source'"
+
+        return ,$bytes
     }
 
     $assetRoot = if ([string]::IsNullOrWhiteSpace($RemoteAssetRoot)) {
@@ -2324,7 +2521,10 @@ function Invoke-IbukiBootstrap {
     $releaseMetadataDisplayed = $false
     $state.BootstrapperVersion = $releaseMetadata.Version
 
-    if ($releaseMetadata.FullCommitId -match '^[0-9a-f]{40}$') {
+    if (
+        -not $releaseMetadata.IsWorkingTreeDirty -and
+        $releaseMetadata.FullCommitId -match '^[0-9a-f]{40}$'
+    ) {
         $state.BootstrapperCommit = $releaseMetadata.FullCommitId
     } else {
         $state.BootstrapperCommit = ""
@@ -2384,6 +2584,10 @@ function Invoke-IbukiBootstrap {
         }
     }
 
+    if ($useLocalBlueprint) {
+        Assert-CleanLocalBootstrapRoot -ExpectedCommit $releaseMetadata.FullCommitId
+    }
+
     if (-not $useLocalBlueprint) {
         if ($releaseMetadata.IsLocal) {
             $releaseMetadata = Get-RemoteReleaseMetadata
@@ -2441,6 +2645,10 @@ function Invoke-IbukiBootstrap {
     $blueprintSources = Read-BlueprintSources `
         -ResolvedFiles $resolvedFiles `
         -UseLocalBlueprint:$useLocalBlueprint
+
+    if ($useLocalBlueprint) {
+        Assert-CleanLocalBootstrapRoot -ExpectedCommit $releaseMetadata.FullCommitId
+    }
 
     if ($configuration.CreateGitHub) {
         Assert-Command -Name git

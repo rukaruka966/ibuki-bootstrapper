@@ -9,7 +9,55 @@ $temporaryBase = if ($env:RUNNER_TEMP) {
     [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
 }
 $testRoot = Join-Path $temporaryBase "ibuki-contract-$([guid]::NewGuid())"
+$bootstrapSourceRoot = Join-Path $testRoot "bootstrap-source"
 $strictUtf8 = [System.Text.UTF8Encoding]::new($false, $true)
+
+function Invoke-BootstrapFixtureGit {
+    param([Parameter(Mandatory)][string[]]$Arguments)
+
+    $output = & git -C $bootstrapSourceRoot @Arguments 2>&1
+    $exitCode = $LASTEXITCODE
+
+    if ($exitCode -ne 0) {
+        throw (
+            "Unable to create clean Bootstrapper test source with git " +
+            "$($Arguments -join ' '): $($output -join "`n")"
+        )
+    }
+}
+
+function New-CleanBootstrapTestSource {
+    New-Item -ItemType Directory -Path $bootstrapSourceRoot | Out-Null
+    Copy-Item `
+        -LiteralPath (Join-Path $repositoryRoot "bootstrap.ps1") `
+        -Destination (Join-Path $bootstrapSourceRoot "bootstrap.ps1")
+    Copy-Item `
+        -LiteralPath (Join-Path $repositoryRoot "blueprints") `
+        -Destination $bootstrapSourceRoot `
+        -Recurse
+
+    Invoke-BootstrapFixtureGit -Arguments @("init", "-b", "main", "--object-format=sha1")
+    Invoke-BootstrapFixtureGit -Arguments @("add", "--all")
+    Invoke-BootstrapFixtureGit -Arguments @(
+        "-c",
+        "user.name=Ibuki Contract Test",
+        "-c",
+        "user.email=ibuki@example.invalid",
+        "-c",
+        "commit.gpgSign=false",
+        "commit",
+        "--no-verify",
+        "-m",
+        "test: snapshot current Bootstrapper source"
+    )
+    Invoke-BootstrapFixtureGit -Arguments @("tag", "--no-sign", "v0.0.0")
+
+    $status = (& git -C $bootstrapSourceRoot status --porcelain 2>$null) -join ""
+
+    if ($LASTEXITCODE -ne 0 -or -not [string]::IsNullOrWhiteSpace($status)) {
+        throw "Bootstrapper test source is not a clean reproducible snapshot."
+    }
+}
 
 function Assert-GitIgnoreState {
     param(
@@ -483,7 +531,9 @@ function Assert-GeneratedBlueprint {
         [string]$GlobalIgnorePath
     )
 
-    & (Join-Path $repositoryRoot "bootstrap.ps1") `
+    & pwsh `
+        -NoProfile `
+        -File (Join-Path $bootstrapSourceRoot "bootstrap.ps1") `
         -Blueprint $BlueprintId `
         -ProjectId $ProjectId `
         -DisplayName 'Ibuki "Contract" <Project>' `
@@ -497,7 +547,7 @@ function Assert-GeneratedBlueprint {
         throw "Blueprint generation failed with exit code $LASTEXITCODE`: $BlueprintId"
     }
 
-    $manifestPath = Join-Path $repositoryRoot "blueprints/$BlueprintId/manifest.json"
+    $manifestPath = Join-Path $bootstrapSourceRoot "blueprints/$BlueprintId/manifest.json"
     $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
     $contractFiles = [System.Collections.Generic.List[object]]::new()
 
@@ -506,7 +556,7 @@ function Assert-GeneratedBlueprint {
     }
 
     foreach ($fileSetId in @($manifest.fileSets)) {
-        $fileSetPath = Join-Path $repositoryRoot (
+        $fileSetPath = Join-Path $bootstrapSourceRoot (
             "blueprints/_common/$fileSetId/manifest.json"
         )
         $fileSetManifest = Get-Content -LiteralPath $fileSetPath -Raw |
@@ -649,7 +699,7 @@ function Assert-NoOverwriteContract {
 
     & pwsh `
         -NoProfile `
-        -File (Join-Path $repositoryRoot "bootstrap.ps1") `
+        -File (Join-Path $bootstrapSourceRoot "bootstrap.ps1") `
         -Blueprint "web-hono" `
         -ProjectId "contract-no-overwrite" `
         -DisplayName "Contract no overwrite" `
@@ -675,6 +725,7 @@ function Assert-NoOverwriteContract {
 
 try {
     New-Item -ItemType Directory -Path $testRoot | Out-Null
+    New-CleanBootstrapTestSource
     $globalIgnorePath = Join-Path $testRoot "empty-global-ignore"
     [System.IO.File]::WriteAllBytes($globalIgnorePath, [byte[]]::new(0))
     Assert-GeneratedBlueprint `

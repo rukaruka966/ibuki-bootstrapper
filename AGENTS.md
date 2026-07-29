@@ -35,10 +35,15 @@ dependencies or require Node.js, pnpm, or a JDK on behalf of generated projects.
 
 ## Development rules
 
-- Keep `bootstrap.ps1` compatible with PowerShell 7.
+- Keep `bootstrap.ps1` and `update.ps1` compatible with PowerShell 7.
 - Save text as UTF-8 without BOM and use LF line endings.
 - Never write secrets, GitHub tokens, or user-specific absolute paths.
-- Never overwrite or delete files in a generation destination.
+- Never overwrite or delete files during initial project generation.
+- Keep Updater Plan mode read-only. Apply may only add files or replace
+  unchanged managed files after explicit confirmation, on a clean feature
+  branch, with current Plan evidence revalidated; it must never delete files.
+- Treat Update Bundles as untrusted and unauthenticated. Regenerate downloaded
+  or shared Bundles locally before Apply.
 - Keep interactive prompts and non-interactive CI execution behavior aligned.
 - Validate local generation before making GitHub changes.
 - Do not execute generated-project install, lint, test, build, or startup

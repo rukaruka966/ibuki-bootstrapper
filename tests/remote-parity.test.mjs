@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import {
   access,
   copyFile,
@@ -16,6 +16,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import {
+  initializeCleanRepository,
+} from "./helpers/bootstrap-source.mjs";
 
 const repositoryRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -66,21 +69,6 @@ function runPowerShell(scriptPath, destination, cwd, configuration) {
       resolve({ code, output: `${stdout}\n${stderr}` });
     });
   });
-}
-
-function initializeRepository(directory) {
-  for (const args of [
-    ["init", "-b", "main", "--quiet"],
-    ["config", "user.name", "Ibuki Test"],
-    ["config", "user.email", "ibuki@example.invalid"],
-    ["commit", "--allow-empty", "-m", "test", "--quiet"],
-    ["tag", "v0.5.0"],
-  ]) {
-    const result = spawnSync("git", ["-C", directory, ...args], {
-      encoding: "utf8",
-    });
-    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
-  }
 }
 
 async function readTree(root) {
@@ -288,7 +276,7 @@ test(`${configuration.blueprint}: local and HTTP Blueprint sources generate iden
       path.join(commonRoot, "template", "common.txt"),
       commonText,
     );
-    initializeRepository(localRoot);
+    initializeCleanRepository(localRoot, "v0.5.0");
 
     await new Promise((resolve) => {
       server.listen(0, "127.0.0.1", resolve);
@@ -309,7 +297,7 @@ test(`${configuration.blueprint}: local and HTTP Blueprint sources generate iden
         .replaceAll("https://raw.githubusercontent.com", remoteBaseUrl),
       "utf8",
     );
-    initializeRepository(remoteRoot);
+    initializeCleanRepository(remoteRoot, "v0.5.0");
 
     const localResult = await runPowerShell(
       path.join(localRoot, "bootstrap.ps1"),

@@ -150,6 +150,17 @@ function Write-ByteFile {
     }
 }
 
+function Assert-ProjectId {
+    param([Parameter(Mandatory)][string]$Value)
+
+    if (
+        $Value -notmatch '^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$' -or
+        $Value -match '^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])$'
+    ) {
+        throw "project.config.yaml has an invalid Project ID."
+    }
+}
+
 function Assert-RelativePath {
     param(
         [Parameter(Mandatory)][string]$Value,
@@ -358,9 +369,22 @@ function Read-ProjectConfiguration {
     if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
         throw "Project root does not contain project.config.yaml."
     }
+    $configItem = Get-Item -LiteralPath $configPath -Force
+
+    if (($configItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "project.config.yaml must not be a reparse point."
+    }
+
+    if ($configItem.Length -gt $state.MaximumSourceBytes) {
+        throw "project.config.yaml exceeds the size limit."
+    }
+
 
     Assert-NoReparsePoint -Root $Root -TargetParent (Split-Path -Parent $configPath)
     $bytes = [System.IO.File]::ReadAllBytes($configPath)
+    if ($bytes.Length -gt $state.MaximumSourceBytes) {
+        throw "project.config.yaml changed beyond the size limit."
+    }
     $content = ConvertFrom-StrictUtf8 -Bytes $bytes -Source $configPath
     $lines = @($content.Replace("`r`n", "`n").Replace("`r", "`n") -split "`n")
     $schemaText = Get-YamlScalar -Lines $lines -Key "schemaVersion"
@@ -375,6 +399,7 @@ function Read-ProjectConfiguration {
     }
 
     $projectId = Get-YamlScalar -Lines $lines -Section "project" -Key "id"
+    Assert-ProjectId -Value $projectId
     $displayName = Get-YamlScalar -Lines $lines -Section "project" -Key "displayName"
     $basePackage = Get-YamlScalar `
         -Lines $lines `
@@ -1100,11 +1125,11 @@ function Get-LocalFileState {
     $item = Get-Item -LiteralPath $path -Force
 
     if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
-    if ($item.Length -gt $state.MaximumSourceBytes) {
-        throw "Project file exceeds the comparison size limit: $RelativePath"
+        throw "Project target must not be a reparse point: $RelativePath"
     }
 
-        throw "Project target must not be a reparse point: $RelativePath"
+    if ($item.Length -gt $state.MaximumSourceBytes) {
+        throw "Project file exceeds the comparison size limit: $RelativePath"
     }
 
     $bytes = [System.IO.File]::ReadAllBytes($path)
@@ -1169,6 +1194,69 @@ function New-UnifiedDiff {
     return $OutputRelativePath
 }
 
+function Get-ThreeWayDecision {
+    param(
+        [Parameter(Mandatory)][bool]$BaseExists,
+        [Parameter(Mandatory)][bool]$LocalExists,
+        [Parameter(Mandatory)][bool]$TargetExists,
+        [Parameter(Mandatory)][bool]$LocalMatchesBase,
+        [Parameter(Mandatory)][bool]$LocalMatchesTarget,
+        [Parameter(Mandatory)][bool]$TargetMatchesBase
+    )
+
+    $status = ""
+    $reason = ""
+
+    if (-not $BaseExists -and $TargetExists) {
+        if (-not $LocalExists) {
+            $status = "add"
+            $reason = "target-only"
+        } elseif ($LocalMatchesTarget) {
+            $status = "already-current"
+            $reason = "local-matches-target"
+        } else {
+            $status = "conflict"
+            $reason = "target-only-path-already-exists"
+        }
+    } elseif ($BaseExists -and -not $TargetExists) {
+        if (-not $LocalExists) {
+            $status = "already-current"
+            $reason = "already-removed"
+        } elseif ($LocalMatchesBase) {
+            $status = "delete-candidate"
+            $reason = "removed-by-target"
+        } else {
+            $status = "conflict"
+            $reason = "locally-changed-path-removed-by-target"
+        }
+    } elseif (-not $LocalExists) {
+        if ($TargetMatchesBase) {
+            $status = "keep-local"
+            $reason = "locally-removed-target-unchanged"
+        } else {
+            $status = "conflict"
+            $reason = "locally-removed-target-changed"
+        }
+    } elseif ($LocalMatchesTarget) {
+        $status = "already-current"
+        $reason = "local-matches-target"
+    } elseif ($LocalMatchesBase) {
+        $status = "safe-update"
+        $reason = "local-matches-base"
+    } elseif ($TargetMatchesBase) {
+        $status = "keep-local"
+        $reason = "target-unchanged"
+    } else {
+        $status = "conflict"
+        $reason = "local-and-target-changed"
+    }
+
+    return [PSCustomObject]@{
+        Status = $status
+        Reason = $reason
+    }
+}
+
 function Get-PlanOperations {
     param(
         [Parameter(Mandatory)][string]$ProjectRoot,
@@ -1216,52 +1304,15 @@ function Get-PlanOperations {
             $targetExists -and
             (Test-BytesEqual -Left $base.Bytes -Right $target.Bytes)
         )
-        $status = ""
-        $reason = ""
-
-        if (-not $baseExists -and $targetExists) {
-            if (-not $local.Exists) {
-                $status = "add"
-                $reason = "target-only"
-            } elseif ($localMatchesTarget) {
-                $status = "already-current"
-                $reason = "local-matches-target"
-            } else {
-                $status = "conflict"
-                $reason = "target-only-path-already-exists"
-            }
-        } elseif ($baseExists -and -not $targetExists) {
-            if (-not $local.Exists) {
-                $status = "already-current"
-                $reason = "already-removed"
-            } elseif ($localMatchesBase) {
-                $status = "delete-candidate"
-                $reason = "removed-by-target"
-            } else {
-                $status = "conflict"
-                $reason = "locally-changed-path-removed-by-target"
-            }
-        } elseif (-not $local.Exists) {
-            if ($targetMatchesBase) {
-                $status = "keep-local"
-                $reason = "locally-removed-target-unchanged"
-            } else {
-                $status = "conflict"
-                $reason = "locally-removed-target-changed"
-            }
-        } elseif ($localMatchesTarget) {
-            $status = "already-current"
-            $reason = "local-matches-target"
-        } elseif ($localMatchesBase) {
-            $status = "safe-update"
-            $reason = "local-matches-base"
-        } elseif ($targetMatchesBase) {
-            $status = "keep-local"
-            $reason = "target-unchanged"
-        } else {
-            $status = "conflict"
-            $reason = "local-and-target-changed"
-        }
+        $decision = Get-ThreeWayDecision `
+            -BaseExists $baseExists `
+            -LocalExists $local.Exists `
+            -TargetExists $targetExists `
+            -LocalMatchesBase $localMatchesBase `
+            -LocalMatchesTarget $localMatchesTarget `
+            -TargetMatchesBase $targetMatchesBase
+        $status = $decision.Status
+        $reason = $decision.Reason
 
         $kind = if ($null -ne $target) {
             $target.Kind
@@ -1469,6 +1520,53 @@ function Test-GitClean {
     }
 }
 
+function Assert-ApplyGitState {
+    param(
+        [Parameter(Mandatory)][string]$Root,
+        [Parameter(Mandatory)][string]$DefaultBranch,
+        [Parameter(Mandatory)][string]$IntegrationBranch,
+        [string]$ExpectedBranch = "",
+        [string]$ExpectedCommit = ""
+    )
+
+    Test-GitClean -Root $Root
+    $branch = ((& git -C $Root branch --show-current 2>$null) -join "").Trim()
+
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($branch)) {
+        throw "Apply Mode requires a named Git branch."
+    }
+
+    $head = ((& git -C $Root rev-parse HEAD 2>$null) -join "").Trim()
+
+    if ($LASTEXITCODE -ne 0 -or $head -notmatch '^[0-9a-f]{40,64}$') {
+        throw "Apply Mode cannot resolve the current Git Commit."
+    }
+
+    if ($branch -in @($DefaultBranch, $IntegrationBranch)) {
+        throw "Apply Mode must run on a branch other than '$branch'."
+    }
+
+    if (
+        (-not [string]::IsNullOrWhiteSpace($ExpectedBranch) -and
+            -not $branch.Equals(
+                $ExpectedBranch,
+                [System.StringComparison]::Ordinal
+            )) -or
+        (-not [string]::IsNullOrWhiteSpace($ExpectedCommit) -and
+            -not $head.Equals(
+                $ExpectedCommit,
+                [System.StringComparison]::OrdinalIgnoreCase
+            ))
+    ) {
+        throw "Apply Git branch or Commit changed after validation."
+    }
+
+    return [PSCustomObject]@{
+        Branch = $branch
+        Commit = $head
+    }
+}
+
 
 function Assert-PlanContract {
     param([Parameter(Mandatory)][object]$Plan)
@@ -1502,12 +1600,24 @@ function Assert-PlanContract {
         "conflict",
         "delete-candidate"
     )
+    $countProperties = if ($null -eq $Plan.counts) {
+        @()
+    } else {
+        @($Plan.counts.PSObject.Properties.Name)
+    }
+
+    if (
+        $countProperties.Count -ne $allowedStatuses.Count -or
+        @($countProperties | Where-Object { $_ -notin $allowedStatuses }).Count -gt 0
+    ) {
+        throw "Plan counts have an invalid contract."
+    }
 
     foreach ($operation in $operations) {
         $propertyNames = @($operation.PSObject.Properties.Name)
 
         foreach ($required in @(
-            "path", "kind", "status", "baseHash", "localHash",
+            "path", "kind", "status", "reason", "baseHash", "localHash",
             "targetHash", "targetArtifact"
         )) {
             if ($required -notin $propertyNames) {
@@ -1576,8 +1686,211 @@ function Assert-PlanContract {
         }
     }
 
+    foreach ($allowedStatus in $allowedStatuses) {
+        $countValue = $Plan.counts.PSObject.Properties[$allowedStatus].Value
+
+        if (
+            ($countValue -isnot [int] -and $countValue -isnot [long]) -or
+            $countValue -lt 0 -or
+            $countValue -gt $state.MaximumFiles
+        ) {
+            throw "Plan count is invalid: $allowedStatus"
+        }
+
+        $actualCount = @(
+            $operations | Where-Object {
+                [string]$_.status -eq $allowedStatus
+            }
+        ).Count
+
+        if ($countValue -ne $actualCount) {
+            throw "Plan counts do not match its operations: $allowedStatus"
+        }
+    }
+
     if (-not $seenPaths.Contains("project.config.yaml")) {
         throw "Plan does not contain project.config.yaml."
+    }
+}
+
+function Get-PlanArtifactMap {
+    param(
+        [Parameter(Mandatory)][string]$BundleRoot,
+        [Parameter(Mandatory)][string]$RelativeRoot,
+        [Parameter(Mandatory)][string]$Label
+    )
+
+    $artifactRoot = Resolve-ChildPath `
+        -Root $BundleRoot `
+        -RelativePath $RelativeRoot `
+        -Label $Label `
+        -MaximumLength 1024
+
+    if (-not (Test-Path -LiteralPath $artifactRoot -PathType Container)) {
+        throw "Plan $Label directory is missing."
+    }
+
+    Assert-NoReparsePoint -Root $BundleRoot -TargetParent $artifactRoot
+    $files = [System.Collections.Generic.Dictionary[string, object]]::new(
+        [System.StringComparer]::OrdinalIgnoreCase
+    )
+    $totalBytes = [long]0
+
+    foreach ($item in @(Get-ChildItem -LiteralPath $artifactRoot -Recurse -Force)) {
+        if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Plan $Label contains a reparse point."
+        }
+
+        if ($item.PSIsContainer) {
+            continue
+        }
+
+        if ($files.Count -ge $state.MaximumFiles) {
+            throw "Plan $Label contains too many files."
+        }
+
+        $relativePath = [System.IO.Path]::GetRelativePath(
+            $artifactRoot,
+            $item.FullName
+        ).Replace("\", "/")
+        Assert-RelativePath -Value $relativePath -Label "Plan $Label"
+
+        if ($item.Length -gt $state.MaximumSourceBytes) {
+            throw "Plan $Label file exceeds the size limit: $relativePath"
+        }
+
+        $bytes = [System.IO.File]::ReadAllBytes($item.FullName)
+
+        if ($bytes.Length -gt $state.MaximumSourceBytes) {
+            throw "Plan $Label file changed beyond the size limit: $relativePath"
+        }
+
+        $totalBytes += $bytes.Length
+
+        if ($totalBytes -gt $state.MaximumTotalBytes) {
+            throw "Plan $Label files exceed the total size limit."
+        }
+
+        if ($files.ContainsKey($relativePath)) {
+            throw "Plan $Label contains a duplicate path: $relativePath"
+        }
+
+        $files.Add($relativePath, [PSCustomObject]@{
+            Path = $relativePath
+            Hash = Get-Sha256Hex -Bytes $bytes
+        })
+    }
+
+    return ,$files
+}
+
+function Assert-PlanOperationSet {
+    param(
+        [Parameter(Mandatory)][object]$Plan,
+        [Parameter(Mandatory)][string]$BundleRoot,
+        [Parameter(Mandatory)][string]$ProjectRoot
+    )
+
+    $baseFiles = Get-PlanArtifactMap `
+        -BundleRoot $BundleRoot `
+        -RelativeRoot "artifacts/base" `
+        -Label "base artifacts"
+    $targetFiles = Get-PlanArtifactMap `
+        -BundleRoot $BundleRoot `
+        -RelativeRoot "artifacts/target" `
+        -Label "target artifacts"
+    $artifactPaths = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::OrdinalIgnoreCase
+    )
+
+    foreach ($relativePath in @($baseFiles.Keys) + @($targetFiles.Keys)) {
+        [void]$artifactPaths.Add($relativePath)
+    }
+
+    $operationPaths = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::OrdinalIgnoreCase
+    )
+
+    foreach ($operation in @($Plan.operations)) {
+        [void]$operationPaths.Add([string]$operation.path)
+    }
+
+    if (
+        $operationPaths.Count -ne $artifactPaths.Count -or
+        @($artifactPaths | Where-Object { -not $operationPaths.Contains($_) }).Count -gt 0
+    ) {
+        throw "Plan operation set does not match its base and target artifacts."
+    }
+
+    foreach ($operation in @($Plan.operations)) {
+        $relativePath = [string]$operation.path
+        $base = if ($baseFiles.ContainsKey($relativePath)) {
+            $baseFiles[$relativePath]
+        } else {
+            $null
+        }
+        $target = if ($targetFiles.ContainsKey($relativePath)) {
+            $targetFiles[$relativePath]
+        } else {
+            $null
+        }
+        $local = Get-LocalFileState `
+            -Root $ProjectRoot `
+            -RelativePath $relativePath
+        $baseExists = $null -ne $base
+        $targetExists = $null -ne $target
+        $hasBaseHash = $null -ne $operation.baseHash
+        $hasLocalHash = $null -ne $operation.localHash
+        $hasTargetHash = $null -ne $operation.targetHash
+
+        if (
+            $baseExists -ne $hasBaseHash -or
+            ($baseExists -and $base.Hash -ne [string]$operation.baseHash) -or
+            $targetExists -ne $hasTargetHash -or
+            ($targetExists -and $target.Hash -ne [string]$operation.targetHash)
+        ) {
+            throw "Plan operation hashes do not match its artifacts: $relativePath"
+        }
+
+        if (
+            $local.Exists -ne $hasLocalHash -or
+            ($local.Exists -and $local.Hash -ne [string]$operation.localHash)
+        ) {
+            throw "Project changed after Plan creation: $relativePath"
+        }
+
+        $expectedArtifact = if ($targetExists) {
+            "artifacts/target/$relativePath"
+        } else {
+            ""
+        }
+        $actualArtifact = if ($null -eq $operation.targetArtifact) {
+            ""
+        } else {
+            [string]$operation.targetArtifact
+        }
+
+        if (-not $actualArtifact.Equals(
+            $expectedArtifact,
+            [System.StringComparison]::Ordinal
+        )) {
+            throw "Plan target artifact presence does not match its operation: $relativePath"
+        }
+
+        $decision = Get-ThreeWayDecision `
+            -BaseExists $baseExists `
+            -LocalExists $local.Exists `
+            -TargetExists $targetExists `
+            -LocalMatchesBase ($baseExists -and $local.Exists -and $local.Hash -eq $base.Hash) `
+            -LocalMatchesTarget ($targetExists -and $local.Exists -and $local.Hash -eq $target.Hash) `
+            -TargetMatchesBase ($baseExists -and $targetExists -and $base.Hash -eq $target.Hash)
+
+        if (
+            [string]$operation.status -ne $decision.Status -or
+            [string]$operation.reason -ne $decision.Reason
+        ) {
+            throw "Plan operation classification does not match current evidence: $relativePath"
+        }
     }
 }
 
@@ -1597,10 +1910,18 @@ function Invoke-ApplyPlan {
     if (($planItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
         throw "Plan file must not be a reparse point."
     }
+    if ($planItem.Length -gt $state.MaximumSourceBytes) {
+        throw "Plan file exceeds the size limit."
+    }
+
 
     Assert-NoReparsePoint -Root $bundleRoot -TargetParent $bundleRoot
 
     $planBytes = [System.IO.File]::ReadAllBytes($canonicalPlanPath)
+    if ($planBytes.Length -gt $state.MaximumSourceBytes) {
+        throw "Plan file changed beyond the size limit."
+    }
+
 
     try {
         $plan = (ConvertFrom-StrictUtf8 `
@@ -1622,9 +1943,11 @@ function Invoke-ApplyPlan {
 
     if (
         $configuration.ProjectId -ne [string]$plan.project.id -or
-        $configuration.Blueprint -ne [string]$plan.project.blueprint
+        $configuration.Blueprint -ne [string]$plan.project.blueprint -or
+        $configuration.DefaultBranch -ne [string]$plan.project.defaultBranch -or
+        $configuration.IntegrationBranch -ne [string]$plan.project.integrationBranch
     ) {
-        throw "Plan does not match the current project identity."
+        throw "Plan does not match the current project identity or branch strategy."
     }
 
     $projectPrefix = $projectRoot.TrimEnd(
@@ -1653,19 +1976,15 @@ function Invoke-ApplyPlan {
         throw "Plan Bundle and Project Root must not contain each other."
     }
 
-    Test-GitClean -Root $projectRoot
-    $branch = (& git -C $projectRoot branch --show-current 2>$null) -join ""
+    $gitState = Assert-ApplyGitState `
+        -Root $projectRoot `
+        -DefaultBranch $configuration.DefaultBranch `
+        -IntegrationBranch $configuration.IntegrationBranch
 
-    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($branch)) {
-        throw "Apply Mode requires a named Git branch."
-    }
-
-    if ($branch -in @(
-        [string]$plan.project.defaultBranch,
-        [string]$plan.project.integrationBranch
-    )) {
-        throw "Apply Mode must run on a branch other than '$branch'."
-    }
+    Assert-PlanOperationSet `
+        -Plan $plan `
+        -BundleRoot $bundleRoot `
+        -ProjectRoot $projectRoot
 
     $blocking = @(
         $plan.operations | Where-Object {
@@ -1731,6 +2050,17 @@ function Invoke-ApplyPlan {
         }
     }
 
+    $null = Assert-ApplyGitState `
+        -Root $projectRoot `
+        -DefaultBranch $configuration.DefaultBranch `
+        -IntegrationBranch $configuration.IntegrationBranch `
+        -ExpectedBranch $gitState.Branch `
+        -ExpectedCommit $gitState.Commit
+    Assert-PlanOperationSet `
+        -Plan $plan `
+        -BundleRoot $bundleRoot `
+        -ProjectRoot $projectRoot
+
     $rollbackRoot = Join-Path $bundleRoot (
         "rollback-" + [guid]::NewGuid().ToString("N")
     )
@@ -1753,6 +2083,25 @@ function Invoke-ApplyPlan {
     try {
         foreach ($operation in $writableOperations) {
             $relativePath = [string]$operation.path
+            $currentLocal = Get-LocalFileState `
+                -Root $projectRoot `
+                -RelativePath $relativePath
+            $expectedLocalHash = if ($null -eq $operation.localHash) {
+                $null
+            } else {
+                [string]$operation.localHash
+            }
+
+            if (
+                ($null -eq $expectedLocalHash -and $currentLocal.Exists) -or
+                ($null -ne $expectedLocalHash -and (
+                    -not $currentLocal.Exists -or
+                    $currentLocal.Hash -ne $expectedLocalHash
+                ))
+            ) {
+                throw "Project changed immediately before Apply: $relativePath"
+            }
+
             $targetPath = Resolve-ChildPath `
                 -Root $projectRoot `
                 -RelativePath $relativePath `
@@ -1771,6 +2120,15 @@ function Invoke-ApplyPlan {
                 -Label "target artifact" `
                 -MaximumLength 1024
             $artifactBytes = [System.IO.File]::ReadAllBytes($artifactPath)
+
+            if (
+                $artifactBytes.Length -gt $state.MaximumSourceBytes -or
+                (Get-Sha256Hex -Bytes $artifactBytes) -ne
+                    [string]$operation.targetHash
+            ) {
+                throw "Plan target artifact changed immediately before Apply: $relativePath"
+            }
+
             $rollbackPath = $null
 
             if ($operation.status -eq "safe-update") {
@@ -1963,6 +2321,16 @@ function Invoke-Plan {
 
     if ([version]$targetSource.Version -lt [version]$baseSource.Version) {
         throw "Target version must not be older than the current version."
+    }
+
+    if (
+        [version]$targetSource.Version -eq [version]$baseSource.Version -and
+        -not ([string]$targetSource.Commit).Equals(
+            [string]$baseSource.Commit,
+            [System.StringComparison]::OrdinalIgnoreCase
+        )
+    ) {
+        throw "Same-version retargeting is not allowed: target Commit differs."
     }
 
     $bundleRoot = if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {

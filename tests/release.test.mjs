@@ -305,6 +305,305 @@ test("standalone generation succeeds without a previous release tag", async () =
   }
 });
 
+test("local generation rejects dirty Bootstrapper provenance before writing", async () => {
+  const fixture = await mkdtemp(path.join(os.tmpdir(), "ibuki-dirty-source-"));
+  const fixtureBootstrap = path.join(fixture, "bootstrap.ps1");
+  const blueprintRoot = path.join(fixture, "blueprints", "web-hono");
+  const templateRoot = path.join(blueprintRoot, "template");
+  const templateRelativePath = "blueprints/web-hono/template/README.md.tpl";
+  const templatePath = path.join(fixture, ...templateRelativePath.split("/"));
+  const destination = path.join(fixture, "generated");
+  const hiddenDestination = path.join(fixture, "generated-hidden-dirty");
+  const runGit = (...arguments_) =>
+    spawnSync(
+      "git",
+      [
+        "-c",
+        "user.name=Dirty Source Test",
+        "-c",
+        "user.email=dirty-source@example.invalid",
+        "-c",
+        "commit.gpgSign=false",
+        "-c",
+        "tag.gpgSign=false",
+        ...arguments_,
+      ],
+      { cwd: fixture, encoding: "utf8" },
+    );
+  const runBootstrap = (outputDirectory) =>
+    spawnSync(
+      "pwsh",
+      [
+        "-NoProfile",
+        "-File",
+        fixtureBootstrap,
+        "-Blueprint",
+        "web-hono",
+        "-ProjectId",
+        "dirty-source-test",
+        "-DisplayName",
+        "Dirty Source Test",
+        "-Destination",
+        outputDirectory,
+        "-SkipGitHub",
+        "-NonInteractive",
+        "-Yes",
+      ],
+      {
+        cwd: fixture,
+        encoding: "utf8",
+        timeout: 30_000,
+      },
+    );
+
+  try {
+    await copyFile(bootstrapPath, fixtureBootstrap);
+    await mkdir(templateRoot, { recursive: true });
+    await writeFile(
+      path.join(blueprintRoot, "manifest.json"),
+      `${JSON.stringify(
+        {
+          schemaVersion: 5,
+          id: "web-hono",
+          version: "0.0.0",
+          displayName: "Dirty Source Test",
+          projectRequirements: [],
+          recommendedCommands: [],
+          fileSets: [],
+          files: [
+            {
+              kind: "text",
+              source: "template/README.md.tpl",
+              target: "README.md",
+              template: true,
+            },
+          ],
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+    await writeFile(templatePath, "# __PROJECT_DISPLAY_NAME__\n", "utf8");
+
+    assert.equal(runGit("init", "-b", "main", "--object-format=sha1").status, 0);
+    assert.equal(runGit("add", "--all").status, 0);
+    assert.equal(runGit("commit", "-m", "test: add clean source").status, 0);
+    assert.equal(runGit("tag", "v0.1.0").status, 0);
+    await writeFile(templatePath, "# Dirty __PROJECT_DISPLAY_NAME__\n", "utf8");
+
+    const result = runBootstrap(destination);
+    const output = `${result.stdout}\n${result.stderr}`;
+
+    assert.notEqual(result.status, 0, output);
+    assert.match(output, /requires a clean Bootstrapper working tree/);
+    await assert.rejects(access(destination), { code: "ENOENT" });
+
+    assert.equal(runGit("restore", "--", templateRelativePath).status, 0);
+    assert.equal(
+      runGit("update-index", "--assume-unchanged", templateRelativePath).status,
+      0,
+    );
+    await writeFile(templatePath, "# Hidden dirty content\n", "utf8");
+    assert.equal(runGit("status", "--porcelain").stdout.trim(), "");
+
+    const hiddenResult = runBootstrap(hiddenDestination);
+    const hiddenOutput = `${hiddenResult.stdout}\n${hiddenResult.stderr}`;
+    assert.notEqual(hiddenResult.status, 0, hiddenOutput);
+    assert.match(hiddenOutput, /differs from the recorded Bootstrapper commit/);
+    await assert.rejects(access(hiddenDestination), { code: "ENOENT" });
+  } finally {
+    await rm(fixture, { recursive: true, force: true });
+  }
+});
+
+test("local generation rejects a clean Commit switch during execution", async () => {
+  const fixture = await mkdtemp(path.join(os.tmpdir(), "ibuki-commit-switch-"));
+  const fixtureBootstrap = path.join(fixture, "bootstrap.ps1");
+  const templateRoot = path.join(
+    fixture,
+    "blueprints",
+    "web-hono",
+    "template",
+  );
+  const templatePath = path.join(templateRoot, "README.md.tpl");
+  const destination = path.join(fixture, "commit-switch");
+  const replaceDestination = path.join(fixture, "replace-generated");
+  const runGit = (...arguments_) =>
+    spawnSync(
+      "git",
+      [
+        "-c",
+        "user.name=Commit Switch Test",
+        "-c",
+        "user.email=commit-switch@example.invalid",
+        "-c",
+        "commit.gpgSign=false",
+        "-c",
+        "tag.gpgSign=false",
+        ...arguments_,
+      ],
+      { cwd: fixture, encoding: "utf8" },
+    );
+  let child;
+  let childClosed;
+
+  try {
+    await copyFile(bootstrapPath, fixtureBootstrap);
+    await mkdir(templateRoot, { recursive: true });
+    await writeFile(
+      path.join(fixture, "blueprints", "web-hono", "manifest.json"),
+      `${JSON.stringify(
+        {
+          schemaVersion: 5,
+          id: "web-hono",
+          version: "0.0.0",
+          displayName: "Commit Switch Test",
+          projectRequirements: [],
+          recommendedCommands: [],
+          fileSets: [],
+          files: [
+            {
+              kind: "text",
+              source: "template/README.md.tpl",
+              target: "README.md",
+              template: true,
+            },
+          ],
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+    await writeFile(templatePath, "# Commit A\n", "utf8");
+    assert.equal(
+      runGit("init", "-b", "main", "--object-format=sha1").status,
+      0,
+    );
+    assert.equal(runGit("add", "--all").status, 0);
+    assert.equal(runGit("commit", "--no-verify", "-m", "test: add Commit A").status, 0);
+    const commitA = runGit("rev-parse", "HEAD").stdout.trim();
+    assert.equal(runGit("tag", "v0.1.0").status, 0);
+    await writeFile(templatePath, "# Commit B\n", "utf8");
+    assert.equal(runGit("add", "--all").status, 0);
+    assert.equal(runGit("commit", "--no-verify", "-m", "test: add Commit B").status, 0);
+    const commitB = runGit("rev-parse", "HEAD").stdout.trim();
+    assert.equal(runGit("switch", "--detach", commitA).status, 0);
+
+    child = spawn("pwsh", ["-NoProfile", "-File", fixtureBootstrap], {
+      cwd: fixture,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    let output = "";
+    const closed = new Promise((resolve, reject) => {
+      child.once("close", resolve);
+      child.once("error", reject);
+    });
+    childClosed = closed;
+
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        child.kill();
+        reject(new Error(`Timed out waiting for the wizard prompt.\n${output}`));
+      }, 30_000);
+      const inspect = (chunk) => {
+        output += chunk;
+
+        if (output.includes("Select a project configuration:")) {
+          clearTimeout(timeout);
+          resolve();
+        }
+      };
+      child.stdout.on("data", inspect);
+      child.stderr.on("data", inspect);
+      child.once("close", () => {
+        if (!output.includes("Select a project configuration:")) {
+          clearTimeout(timeout);
+          reject(new Error(`Process exited before the wizard prompt.\n${output}`));
+        }
+      });
+    });
+
+    assert.equal(runGit("switch", "--detach", commitB).status, 0);
+    child.stdin.end(
+      ["1", "commit-switch", "Commit Switch", "1", "n", "y", ""].join("\n"),
+    );
+    const exitCode = await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        child.kill();
+        reject(new Error(`Timed out waiting for Commit switch rejection.\n${output}`));
+      }, 30_000);
+      closed.then(
+        (code) => {
+          clearTimeout(timeout);
+          resolve(code);
+        },
+        (error) => {
+          clearTimeout(timeout);
+          reject(error);
+        },
+      );
+    });
+
+    assert.notEqual(exitCode, 0, output);
+    assert.match(output, /same immutable Bootstrapper commit throughout execution/);
+    await assert.rejects(access(destination), { code: "ENOENT" });
+
+    assert.equal(runGit("replace", commitA, commitB).status, 0);
+    assert.equal(runGit("switch", "--detach", commitA).status, 0);
+    assert.equal(runGit("status", "--porcelain").stdout.trim(), "");
+    const noReplaceStatus = runGit(
+      "--no-replace-objects",
+      "status",
+      "--porcelain",
+    );
+    assert.equal(noReplaceStatus.status, 0);
+    assert.notEqual(noReplaceStatus.stdout.trim(), "");
+
+    const replaceResult = spawnSync(
+      "pwsh",
+      [
+        "-NoProfile",
+        "-File",
+        fixtureBootstrap,
+        "-Blueprint",
+        "web-hono",
+        "-ProjectId",
+        "replace-generated",
+        "-DisplayName",
+        "Replace Generated",
+        "-Destination",
+        replaceDestination,
+        "-SkipGitHub",
+        "-NonInteractive",
+        "-Yes",
+      ],
+      {
+        cwd: fixture,
+        encoding: "utf8",
+        timeout: 30_000,
+      },
+    );
+    const replaceOutput = `${replaceResult.stdout}\n${replaceResult.stderr}`;
+
+    assert.notEqual(replaceResult.status, 0, replaceOutput);
+    assert.match(replaceOutput, /requires a clean Bootstrapper working tree/);
+    await assert.rejects(access(replaceDestination), { code: "ENOENT" });
+  } finally {
+    child?.kill();
+    await childClosed?.catch(() => {});
+    await rm(fixture, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 100,
+    });
+  }
+});
+
 test("partial checkout displays remote metadata for a missing Blueprint", async () => {
   const fixture = await mkdtemp(path.join(os.tmpdir(), "ibuki-partial-"));
   const fixtureBootstrap = path.join(fixture, "bootstrap.ps1");

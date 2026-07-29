@@ -202,6 +202,11 @@ irm https://raw.githubusercontent.com/rukaruka966/ibuki-bootstrapper/main/update
 `delete-candidate`は人間の明示承認なしに削除しません。Bundle内のdiffにはローカル変更や
 Secretが含まれる可能性があるため、公開・添付・Commitする前に内容を確認してください。
 
+Applyの整合性検査は、Planの操作内容、artifact、現在のprojectが食い違う変更を検出します。
+生成時刻などApply判断に使わないmetadataの変更は対象外であり、Bundle全体を暗号学的に
+認証するものでもありません。ダウンロード・共有されたBundleや、
+Planとartifactが一緒に変更されたBundleにはApplyせず、手元でPlanから再生成してください。
+
 競合がなく、機械的に安全な更新だけの場合は、物理ファイルとして取得したUpdaterを
 明示的にApply Modeで実行できます。
 
