@@ -598,6 +598,22 @@ function Assert-GeneratedBlueprint {
         }
     }
 
+    $projectConfig = Get-Content `
+        -LiteralPath (Join-Path $Destination "project.config.yaml") `
+        -Raw
+
+    foreach ($pattern in @(
+        '(?m)^schemaVersion: 2$',
+        '(?m)^  source: rukaruka966/ibuki-bootstrapper$',
+        "(?m)^  blueprint: $([regex]::Escape($BlueprintId))$",
+        '(?m)^  version: \d+\.\d+\.\d+$',
+        '(?m)^  commit: [0-9a-f]{40}$'
+    )) {
+        if ($projectConfig -notmatch $pattern) {
+            throw "Generated project.config.yaml is missing provenance: $pattern"
+        }
+    }
+
     foreach ($unexpectedPath in @(
         "node_modules",
         "systems/web-frontend/dist",

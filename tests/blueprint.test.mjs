@@ -90,6 +90,7 @@ test("template files use only supported tokens", async () => {
   const { resolved } = await readResolvedFiles("web-hono");
   const supportedTokens = new Set([
     "__BOOTSTRAPPER_VERSION__",
+    "__BOOTSTRAPPER_COMMIT__",
     "__PROJECT_ID__",
     "__PROJECT_DISPLAY_NAME__",
     "__PROJECT_DISPLAY_NAME_HTML__",

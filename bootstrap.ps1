@@ -47,6 +47,7 @@ Set-StrictMode -Version Latest
 $state = [PSCustomObject]@{
     BootstrapperVersion = "0.2.0"
     BootstrapperRepository = "rukaruka966/ibuki-bootstrapper"
+    BootstrapperCommit = ""
     RawBaseUrl = "https://raw.githubusercontent.com/rukaruka966/ibuki-bootstrapper/main"
     BlueprintRevision = "main"
     UseAuthenticatedGitHubApi = $false
@@ -2323,6 +2324,12 @@ function Invoke-IbukiBootstrap {
     $releaseMetadataDisplayed = $false
     $state.BootstrapperVersion = $releaseMetadata.Version
 
+    if ($releaseMetadata.FullCommitId -match '^[0-9a-f]{40}$') {
+        $state.BootstrapperCommit = $releaseMetadata.FullCommitId
+    } else {
+        $state.BootstrapperCommit = ""
+    }
+
     if (
         [string]::IsNullOrWhiteSpace($BootstrapRoot) -and
         -not [string]::IsNullOrWhiteSpace($releaseMetadata.FullCommitId)
@@ -2381,6 +2388,12 @@ function Invoke-IbukiBootstrap {
         if ($releaseMetadata.IsLocal) {
             $releaseMetadata = Get-RemoteReleaseMetadata
             $state.BootstrapperVersion = $releaseMetadata.Version
+
+            if ($releaseMetadata.FullCommitId -match '^[0-9a-f]{40}$') {
+                $state.BootstrapperCommit = $releaseMetadata.FullCommitId
+            } else {
+                $state.BootstrapperCommit = ""
+            }
         }
 
         if ([string]::IsNullOrWhiteSpace($releaseMetadata.FullCommitId)) {
@@ -2497,8 +2510,13 @@ function Invoke-IbukiBootstrap {
     $displayNameYaml = $DisplayName.Replace("\", "\\").Replace('"', '\"')
     $displayNameJson = $DisplayName | ConvertTo-Json -Compress
     $displayNameHtml = [System.Net.WebUtility]::HtmlEncode($DisplayName)
+    if ($state.BootstrapperCommit -notmatch '^[0-9a-f]{40}$') {
+        throw "Unable to record an immutable Bootstrapper commit in project.config.yaml."
+    }
+
     $tokens = @{
         "__BOOTSTRAPPER_VERSION__" = $state.BootstrapperVersion
+        "__BOOTSTRAPPER_COMMIT__" = $state.BootstrapperCommit
         "__PROJECT_ID__" = $ProjectId
         "__PROJECT_DISPLAY_NAME__" = $DisplayName
         "__PROJECT_DISPLAY_NAME_YAML__" = $displayNameYaml

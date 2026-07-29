@@ -31,6 +31,24 @@ Build成果物の規則をnested `.gitignore`で所有します。たとえば
 security boundaryではありません。SecretはRepository外で管理し、Commit前に
 staging内容を確認してください。
 
+## 生成ファイルの更新
+
+プロジェクトルートからIbuki Updaterを実行すると、ファイルを変更せずに3-way比較した
+Update Bundleを作成できます。
+
+```powershell
+irm https://raw.githubusercontent.com/rukaruka966/ibuki-bootstrapper/main/update.ps1 | iex
+```
+
+Bundleには`plan.json`、Codexへ渡せる`prompt.md`、baseとtargetのartifact、text
+diffが含まれます。意味判断が必要な競合は、接続中のAI開発Agentへpromptを渡して
+解消します。ローカルdiffにはSecretが含まれる可能性があるため、共有前に確認して
+ください。
+
+`delete-candidate`は人間の明示承認なしに削除しません。Apply Modeは任意であり、
+cleanな機能ブランチ上の競合がないPlanだけを受け付けます。依存関係の導入、
+プロジェクトコマンド、Commit、push、Pull Request作成は自動実行しません。
+
 ## Issueの受け付け
 
 人間は観測結果と期待結果を伝えます。GitHub Issueを使用する場合、AI Agentは

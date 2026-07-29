@@ -33,6 +33,26 @@ They can hide legitimate assets belonging to another system. A `.gitignore`
 reduces accidental commits; it is not a security boundary. Keep secrets outside
 the repository and review staged changes before committing.
 
+## Updating generated files
+
+Run the Ibuki Updater from the project root to create a read-only, three-way
+Update Bundle:
+
+```powershell
+irm https://raw.githubusercontent.com/rukaruka966/ibuki-bootstrapper/main/update.ps1 | iex
+```
+
+The Bundle contains `plan.json`, a ready-to-use `prompt.md`, base and target
+artifacts, and text diffs. Plan Mode does not change project files. Give the
+prompt to the connected AI development agent when semantic conflict resolution
+is required. Review the Bundle before sharing it because local diffs can contain
+secrets.
+
+Do not delete `delete-candidate` files without explicit human approval. Apply
+Mode is optional and accepts only a conflict-free Plan from a clean feature
+branch. It does not install dependencies, run project commands, commit, push, or
+create a Pull Request.
+
 ## Issue intake
 
 Humans provide observed and desired outcomes. When the repository uses GitHub
