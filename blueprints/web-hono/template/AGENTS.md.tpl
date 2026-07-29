@@ -66,6 +66,16 @@ Stop for explicit confirmation before destructive file operations, data
 migrations, compatibility changes, secret exposure, or weaker repository
 protection.
 
+## AI and human handoff
+
+- Humans provide observed and desired outcomes and perform acceptance checks.
+- When the repository uses GitHub Issues, AI agents update the Issue before
+  implementation with scope, non-goals, acceptance targets, constraints and
+  stop conditions, and a verification plan.
+- AI agents own implementation, verification, review, and Pull Request evidence.
+- Acceptance may remain `Pending` on `develop`; promotion to `main` requires
+  an `Accepted` result or evidence.
+
 ## Definition of Done
 
 A change is complete when all applicable items below are satisfied:

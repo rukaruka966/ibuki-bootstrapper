@@ -46,6 +46,16 @@ dependencies or require Node.js, pnpm, or a JDK on behalf of generated projects.
 - Keep the public entry point self-contained.
 - Use the Blueprint manifest as the source of truth for generated files.
 
+## AI and human handoff
+
+- Humans provide observed and desired outcomes and perform acceptance checks.
+- When the repository uses GitHub Issues, AI agents update the Issue before
+  implementation with scope, non-goals, acceptance targets, constraints and
+  stop conditions, and a verification plan.
+- AI agents own implementation, verification, review, and Pull Request evidence.
+- Acceptance may remain `Pending` on `develop`; promotion to `main` requires
+  an `Accepted` result or evidence.
+
 ## Git workflow
 
 - Register implementation work in a GitHub Issue when a remote exists.
