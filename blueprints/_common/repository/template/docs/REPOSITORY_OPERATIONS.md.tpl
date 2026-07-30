@@ -19,6 +19,59 @@ additional application requirement for Spring projects. Direct Gradle Wrapper
 commands remain available for diagnosis, but automation and AI agents should
 use the root pnpm commands.
 
+## Ignore-file ownership
+
+The root `.gitignore` contains only repository-wide rules for pnpm dependencies,
+local environment variables, logs, IDE state, and operating-system metadata.
+Each independently buildable system owns its build-output rules in a nested
+`.gitignore`. For example, `systems/api-server/.gitignore` owns Gradle, Kotlin,
+and JVM output, while Node.js systems own `dist`, coverage, and TypeScript build
+metadata.
+
+Do not add broad root rules for names such as `build`, `bin`, or `dist`.
+They can hide legitimate assets belonging to another system. A `.gitignore`
+reduces accidental commits; it is not a security boundary. Keep secrets outside
+the repository and review staged changes before committing.
+
+## Updating generated files
+
+Run the Ibuki Updater from the project root to create a read-only, three-way
+Update Bundle:
+
+```powershell
+irm https://raw.githubusercontent.com/rukaruka966/ibuki-bootstrapper/main/update.ps1 | iex
+```
+
+The Bundle contains `plan.json`, a ready-to-use `prompt.md`, base and target
+artifacts, and text diffs. Plan Mode does not change project files. Give the
+prompt to the connected AI development agent when semantic conflict resolution
+is required. Review the Bundle before sharing it because local diffs can contain
+secrets.
+
+Do not delete `delete-candidate` files without explicit human approval. Apply
+Mode is optional and accepts only a conflict-free Plan from a clean feature
+branch. It does not install dependencies, run project commands, commit, push, or
+create a Pull Request.
+
+## Issue intake
+
+Humans provide observed and desired outcomes. When the repository uses GitHub
+Issues, AI agents update the Issue before implementation with scope, non-goals,
+observable acceptance targets, request-specific constraints and stop conditions,
+and a verification plan.
+
+## Pull Request handoff
+
+Use the Pull Request template as a handoff contract between AI delivery and
+human acceptance. A Pull Request to `develop` may keep human acceptance
+`Pending` after AI implementation, verification, and review are complete, but
+it must state the observable acceptance target. A Pull Request from `develop`
+to `main` requires acceptance to be `Accepted` with its result or evidence.
+
+Record decisions, differences from the request, verification evidence, review
+findings, and triggered stop conditions. Avoid ceremonial checklists that do
+not provide evidence or affect the next decision.
+
 The `main` branch is released through semantic-release after Quality succeeds.
 Release Notes are generated from Conventional Commits. Releases create a Git
 tag and GitHub Release without committing a changelog file.

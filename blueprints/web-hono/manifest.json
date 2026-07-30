@@ -30,7 +30,6 @@
   "files": [
     { "kind": "text", "source": "template/.env.example.tpl", "target": ".env.example", "template": true },
     { "kind": "text", "source": "template/.gitattributes.tpl", "target": ".gitattributes", "template": false },
-    { "kind": "text", "source": "template/.gitignore.tpl", "target": ".gitignore", "template": false },
     { "kind": "text", "source": "template/.markdownlint.json.tpl", "target": ".markdownlint.json", "template": false },
     { "kind": "text", "source": "template/AGENTS.md.tpl", "target": "AGENTS.md", "template": true },
     { "kind": "text", "source": "template/DESIGN.md.tpl", "target": "DESIGN.md", "template": false },
@@ -44,6 +43,8 @@
     { "kind": "text", "source": "template/tsconfig.base.json.tpl", "target": "tsconfig.base.json", "template": false },
     { "kind": "text", "source": "template/.github/workflows/ci.yml.tpl", "target": ".github/workflows/ci.yml", "template": false },
     { "kind": "text", "source": "template/scripts/doctor.ps1.tpl", "target": "scripts/doctor.ps1", "template": false },
+    { "kind": "text", "source": "template/node-typescript.gitignore.tpl", "target": "systems/web-frontend/.gitignore", "template": false },
+    { "kind": "text", "source": "template/node-typescript.gitignore.tpl", "target": "systems/api-bff/.gitignore", "template": false },
     { "kind": "text", "source": "template/systems/web-frontend/package.json.tpl", "target": "systems/web-frontend/package.json", "template": true },
     { "kind": "text", "source": "template/systems/web-frontend/tsconfig.json.tpl", "target": "systems/web-frontend/tsconfig.json", "template": false },
     { "kind": "text", "source": "template/systems/web-frontend/vite.config.ts.tpl", "target": "systems/web-frontend/vite.config.ts", "template": false },

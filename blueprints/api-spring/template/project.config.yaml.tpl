@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 2
 project:
   id: __PROJECT_ID__
   displayName: "__PROJECT_DISPLAY_NAME_YAML__"
@@ -11,4 +11,7 @@ systems:
     type: spring-boot
     port: 8080
 bootstrapper:
+  source: rukaruka966/ibuki-bootstrapper
+  blueprint: api-spring
   version: __BOOTSTRAPPER_VERSION__
+  commit: __BOOTSTRAPPER_COMMIT__

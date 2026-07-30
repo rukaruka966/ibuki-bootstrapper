@@ -27,6 +27,10 @@ GitHub Repositoryも作成する場合だけ、次を追加で使用します。
 - `gh auth login`で認証済みのGitHub CLI
 - `git config user.name`と`git config user.email`の設定
 
+生成済みプロジェクトでUpdaterを使う場合は、3-way text diffとApply前のworktree確認に
+Git for Windowsを使用します。Release情報は通常、未認証GitHub APIから取得し、
+利用可能な場合だけ認証済みGitHub CLIをfallbackに使用します。
+
 生成後のプロジェクトを開発する場合は、選択したBlueprintに応じて次を使用します。
 これらはIbukiによるファイル生成の前提ではありません。
 
@@ -135,7 +139,7 @@ Windows上の各種開発ツールとの互換性を保つため、正規化後�
 - 単体テスト・executable jar生成・Releaseを実行するルートpnpm scriptsとCI
 - JDK 17を使用するGitHub Actions `Quality`
 - `AGENTS.md`・`DESIGN.md`と日本語参考版
-- `project.config.yaml`への構成・port・Bootstrapper version記録
+- `project.config.yaml`への構成・port・生成元Release／Commit記録
 
 `api-spring-postgres`:
 
@@ -173,6 +177,64 @@ Workflow自体を変更できるため、この検証は個人開発での誤操
 `develop`へ逆同期する作業を不要にします。`develop`ではstrictを有効にし、機能Pull
 Requestを常に最新の`develop`を基準として検証します。
 
+## 生成済みプロジェクトの更新
+
+Ibuki v0.8.0以降のReleaseで生成したプロジェクトでは、プロジェクトルートから
+Updaterを実行できます。標準のPlan Modeはファイルを変更せず、現在のプロジェクト、
+生成時のBlueprint、更新先Releaseを3-way比較します。v0.7.1以前のプロジェクトは
+Manifest契約が異なるため、GitHubからの取得やUpdate Bundle作成前に停止します。
+
+```powershell
+irm https://raw.githubusercontent.com/rukaruka966/ibuki-bootstrapper/main/update.ps1 | iex
+```
+
+標準の更新先は最新GitHub Releaseです。生成されるUpdate BundleはOSの一時領域へ
+保存され、次を含みます。
+
+- `plan.json`: 分類、SHA-256、artifact参照を持つ機械判定の正本
+- `prompt.md`: 接続中のCodexへ渡す更新依頼
+- `summary.md`: 人間向けの件数概要
+- `artifacts/base`: 生成時の不変Commitから再構成したファイル
+- `artifacts/target`: 更新先の不変Commitから再構成したファイル
+- `diffs`: baseからtargetへのtext fileのunified diff
+
+分類は`add`、`safe-update`、`keep-local`、`already-current`、`conflict`、
+`delete-candidate`です。`conflict`はAIが意味を判断して解消し、
+`delete-candidate`は人間の明示承認なしに削除しません。Bundleはローカルファイルの本文や
+プロジェクトの絶対パスを保存せず、比較用のSHA-256と相対パスだけを記録します。競合時は
+接続中のプロジェクトにある対象ファイルを読み、targetが存在すればtarget diffまたは
+artifact、targetで削除されていれば`artifacts/base`の対応ファイルと比較します。
+
+Applyの整合性検査は、Planの操作内容、artifact、現在のprojectが食い違う変更を検出します。
+生成時刻などApply判断に使わないmetadataの変更は対象外であり、Bundle全体を暗号学的に
+認証するものでもありません。ダウンロード・共有されたBundleや、
+Planとartifactが一緒に変更されたBundleにはApplyせず、手元でPlanから再生成してください。
+
+競合がなく、機械的に安全な更新だけの場合は、物理ファイルとして取得したUpdaterを
+明示的にApply Modeで実行できます。
+
+```powershell
+irm https://raw.githubusercontent.com/rukaruka966/ibuki-bootstrapper/main/update.ps1 `
+  -OutFile ./update.ps1
+pwsh ./update.ps1 `
+  -Mode Apply `
+  -PlanPath <Update Bundleのplan.json> `
+  -ProjectRoot . `
+  -Yes
+```
+
+Apply Modeは、cleanなGit worktree上の`main`・`develop`以外のブランチでのみ動作し、
+Plan作成後に対象ファイルまたはartifactが変化していないことをSHA-256で再検証します。
+`conflict`または`delete-candidate`が1件でもあれば、全Applyを停止します。
+プロジェクトのinstall、lint、test、build、起動、Commit、push、Pull Request作成は
+自動実行しません。
+Update Planはschema 2を使用し、Apply対象のルートを保存しません。旧schemaのPlanは
+Applyせず、現在のUpdaterでPlanから作り直してください。
+
+Ibuki v0.8.0以降で生成されたschema v1の`project.config.yaml`は利用できます。
+新規生成または更新後はschema v2になり、生成元Repository、Blueprint ID、
+Release version、不変Commitを記録します。
+
 ## 生成後の不具合報告
 
 生成直後かつ未変更のプロジェクトで、依存関係の導入、lint、テスト、ビルド、起動、
@@ -189,7 +251,10 @@ npm packageの公開やRelease用のソースCommitは行いません。
 
 Bootstrapperの開始時には、実行しているCommitとGitHub Releaseの対応を表示します。
 `main`が最新Releaseより先に進んでいる場合は`Unreleased`と表示します。Release情報
-だけを取得できない場合は`unavailable`と表示して生成を継続します。
+だけを取得できない場合も`unavailable`と表示し、構成選択やキャンセルはできます。ただし、
+生成される`project.config.yaml`へ数値SemVerを記録できないため、実際のファイル生成は
+Destinationへの書込み前に停止します。`Unreleased (latest: vX.Y.Z)`は`X.Y.Z`を記録して
+生成できます。
 
 未認証GitHub APIがrate limitまたは通信エラーになった場合は、GitHub CLIが利用可能
 かつ認証済みなら`gh api`へ自動的にフォールバックします。token自体は取得・表示せず、

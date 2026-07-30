@@ -3,14 +3,22 @@ import { access, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import test from "node:test";
+import test, { after } from "node:test";
 import { fileURLToPath } from "node:url";
+import {
+  createCleanBootstrapSource,
+} from "./helpers/bootstrap-source.mjs";
 
 const repositoryRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
 );
-const bootstrapPath = path.join(repositoryRoot, "bootstrap.ps1");
+const bootstrapFixtureRoot = await createCleanBootstrapSource(repositoryRoot);
+const bootstrapPath = path.join(bootstrapFixtureRoot, "bootstrap.ps1");
+
+after(async () => {
+  await rm(bootstrapFixtureRoot, { recursive: true, force: true });
+});
 
 async function readTreeBytes(root, relative = "") {
   const entries = await readdir(path.join(root, relative), {

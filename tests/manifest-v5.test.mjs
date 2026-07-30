@@ -14,6 +14,10 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import {
+  assertCleanRepository,
+  initializeCleanRepository,
+} from "./helpers/bootstrap-source.mjs";
 
 const repositoryRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -113,6 +117,8 @@ async function runInvalidManifest(
       );
     }
 
+    initializeCleanRepository(fixtureRoot);
+
     const args = [
         "-NoProfile",
         "-File",
@@ -174,6 +180,7 @@ async function runValidManifest(
       "utf8",
     );
     await writeFile(sourcePath, source);
+    initializeCleanRepository(fixtureRoot);
 
     const args = [
         "-NoProfile",
@@ -660,7 +667,20 @@ test("a reparse-point Blueprint root is rejected before manifest execution", asy
       path.join(repositoryRoot, "bootstrap.ps1"),
       bootstrapPath,
     );
+    await mkdir(path.join(linkedBlueprint, "template"), { recursive: true });
+    await writeFile(
+      path.join(linkedBlueprint, "manifest.json"),
+      `${JSON.stringify(manifest, null, 2)}\n`,
+      "utf8",
+    );
+    await writeFile(
+      path.join(linkedBlueprint, "template", "source.bin"),
+      "x\n",
+    );
+    initializeCleanRepository(fixtureRoot);
+    await rm(linkedBlueprint, { recursive: true, force: true });
     await symlink(externalRoot, linkedBlueprint, "junction");
+    assertCleanRepository(fixtureRoot);
 
     const result = spawnSync(
       "pwsh",

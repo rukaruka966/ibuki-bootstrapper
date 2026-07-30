@@ -35,16 +35,35 @@ dependencies or require Node.js, pnpm, or a JDK on behalf of generated projects.
 
 ## Development rules
 
-- Keep `bootstrap.ps1` compatible with PowerShell 7.
+- Keep `bootstrap.ps1` and `update.ps1` compatible with PowerShell 7.
 - Save text as UTF-8 without BOM and use LF line endings.
 - Never write secrets, GitHub tokens, or user-specific absolute paths.
-- Never overwrite or delete files in a generation destination.
+- Never overwrite or delete files during initial project generation.
+- Keep Updater Plan mode read-only. Apply may only add files or replace
+  unchanged managed files after explicit confirmation, on a clean feature
+  branch, with current Plan evidence revalidated; it must never delete files.
+- Treat Update Bundles as untrusted and unauthenticated. Regenerate downloaded
+  or shared Bundles locally before Apply.
+- Never persist local project file contents or user-specific absolute paths in
+  an Update Bundle; keep only relative paths and comparison hashes.
+- Require an explicit `-ProjectRoot` for Apply. Do not recover a write target
+  from persisted Plan data.
 - Keep interactive prompts and non-interactive CI execution behavior aligned.
 - Validate local generation before making GitHub changes.
 - Do not execute generated-project install, lint, test, build, or startup
   commands as part of Bootstrapper success.
 - Keep the public entry point self-contained.
 - Use the Blueprint manifest as the source of truth for generated files.
+
+## AI and human handoff
+
+- Humans provide observed and desired outcomes and perform acceptance checks.
+- When the repository uses GitHub Issues, AI agents update the Issue before
+  implementation with scope, non-goals, acceptance targets, constraints and
+  stop conditions, and a verification plan.
+- AI agents own implementation, verification, review, and Pull Request evidence.
+- Acceptance may remain `Pending` on `develop`; promotion to `main` requires
+  an `Accepted` result or evidence.
 
 ## Git workflow
 

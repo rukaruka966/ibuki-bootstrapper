@@ -90,6 +90,7 @@ test("template files use only supported tokens", async () => {
   const { resolved } = await readResolvedFiles("web-hono");
   const supportedTokens = new Set([
     "__BOOTSTRAPPER_VERSION__",
+    "__BOOTSTRAPPER_COMMIT__",
     "__PROJECT_ID__",
     "__PROJECT_DISPLAY_NAME__",
     "__PROJECT_DISPLAY_NAME_HTML__",
@@ -326,13 +327,76 @@ test("Bootstrapper and package versions stay synchronized", async () => {
   assert.equal(manifest.version, packageJson.version);
 });
 
-test("generated TypeScript build metadata is ignored", async () => {
-  const gitignore = await readFile(
-    path.join(blueprintRoot, "template", ".gitignore.tpl"),
-    "utf8",
-  );
+test("gitignore ownership is common at root and scoped to each system", async () => {
+  const expectedByBlueprint = {
+    "web-hono": [
+      {
+        target: ".gitignore",
+        owner: "blueprints/_common/repository",
+        source: "template/.gitignore.tpl",
+      },
+      {
+        target: "systems/api-bff/.gitignore",
+        owner: "blueprints/web-hono",
+        source: "template/node-typescript.gitignore.tpl",
+      },
+      {
+        target: "systems/web-frontend/.gitignore",
+        owner: "blueprints/web-hono",
+        source: "template/node-typescript.gitignore.tpl",
+      },
+    ],
+    "api-spring": [
+      {
+        target: ".gitignore",
+        owner: "blueprints/_common/repository",
+        source: "template/.gitignore.tpl",
+      },
+      {
+        target: "systems/api-server/.gitignore",
+        owner: "blueprints/_common/spring-gradle",
+        source: "template/systems/api-server/.gitignore.tpl",
+      },
+    ],
+    "api-spring-postgres": [
+      {
+        target: ".gitignore",
+        owner: "blueprints/_common/repository",
+        source: "template/.gitignore.tpl",
+      },
+      {
+        target: "systems/api-server/.gitignore",
+        owner: "blueprints/_common/spring-gradle",
+        source: "template/systems/api-server/.gitignore.tpl",
+      },
+    ],
+  };
 
-  assert.match(gitignore, /^\*\.tsbuildinfo$/m);
+  for (const [blueprintId, expected] of Object.entries(expectedByBlueprint)) {
+    const { resolved } = await readResolvedFiles(blueprintId);
+    const actual = resolved
+      .filter(({ file }) => file.target.endsWith(".gitignore"))
+      .map(({ file, root }) => ({
+        target: file.target.replaceAll("\\", "/"),
+        owner: path
+          .relative(repositoryRoot, root)
+          .replaceAll("\\", "/"),
+        source: file.source.replaceAll("\\", "/"),
+      }))
+      .sort((left, right) => left.target.localeCompare(right.target));
+
+    assert.deepEqual(
+      actual,
+      [...expected].sort((left, right) =>
+        left.target.localeCompare(right.target)),
+      blueprintId,
+    );
+    assert.equal(
+      actual.filter(({ target }) => target === ".gitignore").length,
+      1,
+      `${blueprintId} root owner`,
+    );
+  }
 });
 
 test("Japanese references do not create nested AGENTS.md instruction files", async () => {
@@ -634,7 +698,6 @@ test("Spring Blueprint common infrastructure stays byte-identical", async () => 
 
   for (const relativePath of [
     ".gitattributes.tpl",
-    ".gitignore.tpl",
     ".github/workflows/ci.yml.tpl",
     "pnpm-lock.yaml.tpl",
     "gradlew",
