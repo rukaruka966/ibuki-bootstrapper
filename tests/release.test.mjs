@@ -65,6 +65,7 @@ function runWithMockedGitHubApi({
   ghAvailable = true,
   hideGitHubCli = false,
   input = "q\n",
+  cwd = repositoryRoot,
 }) {
   const escapedBootstrapPath = bootstrapPath.replaceAll("'", "''");
   const mockBody = rateLimited
@@ -143,7 +144,7 @@ function runWithMockedGitHubApi({
   }
 
   return spawnSync(powerShellPath, ["-NoProfile", "-Command", command], {
-    cwd: repositoryRoot,
+    cwd,
     encoding: "utf8",
     env: environment,
     input,
@@ -213,12 +214,13 @@ test("standalone script ignores an unrelated repository HEAD", async () => {
   }
 });
 
-test("standalone generation succeeds without a previous release tag", async () => {
+test("local generation requires a release version and preserves it while main is ahead", async () => {
   const fixture = await mkdtemp(path.join(os.tmpdir(), "ibuki-no-tag-"));
   const fixtureBootstrap = path.join(fixture, "bootstrap.ps1");
   const blueprintRoot = path.join(fixture, "blueprints", "web-hono");
   const templateRoot = path.join(blueprintRoot, "template");
   const destination = path.join(fixture, "generated");
+  const aheadDestination = path.join(fixture, "generated-ahead");
   const runGit = (...arguments_) =>
     spawnSync(
       "git",
@@ -262,11 +264,11 @@ test("standalone generation succeeds without a previous release tag", async () =
     );
     await writeFile(
       path.join(templateRoot, "README.md.tpl"),
-      "# __PROJECT_DISPLAY_NAME__\n",
+      "# __PROJECT_DISPLAY_NAME__\n\nVersion __BOOTSTRAPPER_VERSION__\n",
       "utf8",
     );
 
-    assert.equal(runGit("init", "-b", "main").status, 0);
+    assert.equal(runGit("init", "-b", "main", "--object-format=sha1").status, 0);
     assert.equal(runGit("add", "--all").status, 0);
     assert.equal(runGit("commit", "-m", "chore: add no-tag fixture").status, 0);
 
@@ -296,10 +298,46 @@ test("standalone generation succeeds without a previous release tag", async () =
     );
     const output = `${result.stdout}\n${result.stderr}`;
 
-    assert.equal(result.status, 0, output);
+    assert.notEqual(result.status, 0, output);
     assert.match(output, /Release\/Tag : Unreleased \(no previous tag\)/);
-    assert.match(output, /Project created successfully/);
-    await access(path.join(destination, "README.md"));
+    assert.match(output, /Unable to record a semantic Bootstrapper version/);
+    assert.doesNotMatch(output, /\[Generate\]/);
+    await assert.rejects(access(destination), { code: "ENOENT" });
+
+    assert.equal(runGit("tag", "v0.1.0").status, 0);
+    await writeFile(path.join(fixture, "ahead.txt"), "main ahead\n", "utf8");
+    assert.equal(runGit("add", "ahead.txt").status, 0);
+    assert.equal(runGit("commit", "-m", "chore: move main ahead").status, 0);
+
+    const aheadResult = spawnSync(
+      "pwsh",
+      [
+        "-NoProfile",
+        "-File",
+        fixtureBootstrap,
+        "-Blueprint",
+        "web-hono",
+        "-ProjectId",
+        "ahead-test",
+        "-DisplayName",
+        "Ahead Test",
+        "-Destination",
+        aheadDestination,
+        "-SkipGitHub",
+        "-NonInteractive",
+        "-Yes",
+      ],
+      { cwd: fixture, encoding: "utf8", timeout: 30_000 },
+    );
+    const aheadOutput = `${aheadResult.stdout}\n${aheadResult.stderr}`;
+
+    assert.equal(aheadResult.status, 0, aheadOutput);
+    assert.match(aheadOutput, /Release\/Tag : Unreleased \(latest: v0\.1\.0\)/);
+    assert.match(aheadOutput, /Project created successfully/);
+    assert.match(
+      await readFile(path.join(aheadDestination, "README.md"), "utf8"),
+      /Version 0\.1\.0/,
+    );
   } finally {
     await rm(fixture, { recursive: true, force: true });
   }
@@ -955,6 +993,34 @@ test("later release failure preserves its diagnostic after authenticated fallbac
   assert.doesNotMatch(output, /gho_test_secret_must_not_leak/);
 });
 
+
+test("remote generation rejects unavailable release version before writing", async () => {
+  const fixture = await mkdtemp(path.join(os.tmpdir(), "ibuki-remote-version-"));
+  const destination = path.join(fixture, "remote-version-test");
+
+  try {
+    const commit = "1234567890abcdef1234567890abcdef12345678";
+    const result = runWithMockedGitHubApi({
+      mainCommit: commit,
+      releaseCommit: commit,
+      rateLimited: true,
+      ghFallback: true,
+      ghReleaseFail: true,
+      input: "1\nremote-version-test\n\n\nn\n",
+      cwd: fixture,
+    });
+    const output = `${result.stdout}\n${result.stderr}`;
+
+    assert.notEqual(result.status, 0, output);
+    assert.match(output, /Release\/Tag : unavailable/);
+    assert.match(output, /Commit ID\s+: 1234567890ab/);
+    assert.match(output, /Unable to record a semantic Bootstrapper version/);
+    assert.doesNotMatch(output, /\[Generate\]/);
+    await assert.rejects(access(destination), { code: "ENOENT" });
+  } finally {
+    await rm(fixture, { recursive: true, force: true });
+  }
+});
 test("remote metadata marks main ahead of the latest release", () => {
   const result = runWithMockedGitHubApi({
     mainCommit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",

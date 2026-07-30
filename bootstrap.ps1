@@ -781,6 +781,16 @@ function Write-BootstrapReleaseMetadata {
     Write-Host "------------------------------------------------------------"
 }
 
+function Assert-RecordableBootstrapperProvenance {
+    if ($state.BootstrapperCommit -notmatch '^[0-9a-f]{40}$') {
+        throw "Unable to record an immutable Bootstrapper commit in project.config.yaml."
+    }
+
+    if ($state.BootstrapperVersion -notmatch '^\d+\.\d+\.\d+$') {
+        throw "Unable to record a semantic Bootstrapper version in project.config.yaml."
+    }
+}
+
 function Test-EmptyDirectory {
     param(
         [Parameter(Mandatory)]
@@ -2624,6 +2634,8 @@ function Invoke-IbukiBootstrap {
         $releaseMetadataDisplayed = $true
     }
 
+    Assert-RecordableBootstrapperProvenance
+
     $manifest = Read-BlueprintManifest `
         -BlueprintId $configuration.BlueprintId `
         -LocalBlueprintRoot $localBlueprintRoot `
@@ -2718,9 +2730,7 @@ function Invoke-IbukiBootstrap {
     $displayNameYaml = $DisplayName.Replace("\", "\\").Replace('"', '\"')
     $displayNameJson = $DisplayName | ConvertTo-Json -Compress
     $displayNameHtml = [System.Net.WebUtility]::HtmlEncode($DisplayName)
-    if ($state.BootstrapperCommit -notmatch '^[0-9a-f]{40}$') {
-        throw "Unable to record an immutable Bootstrapper commit in project.config.yaml."
-    }
+    Assert-RecordableBootstrapperProvenance
 
     $tokens = @{
         "__BOOTSTRAPPER_VERSION__" = $state.BootstrapperVersion

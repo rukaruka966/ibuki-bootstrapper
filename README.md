@@ -195,12 +195,14 @@ irm https://raw.githubusercontent.com/rukaruka966/ibuki-bootstrapper/main/update
 - `summary.md`: 人間向けの件数概要
 - `artifacts/base`: 生成時の不変Commitから再構成したファイル
 - `artifacts/target`: 更新先の不変Commitから再構成したファイル
-- `diffs`: text fileのunified diff
+- `diffs`: baseからtargetへのtext fileのunified diff
 
 分類は`add`、`safe-update`、`keep-local`、`already-current`、`conflict`、
 `delete-candidate`です。`conflict`はAIが意味を判断して解消し、
-`delete-candidate`は人間の明示承認なしに削除しません。Bundle内のdiffにはローカル変更や
-Secretが含まれる可能性があるため、公開・添付・Commitする前に内容を確認してください。
+`delete-candidate`は人間の明示承認なしに削除しません。Bundleはローカルファイルの本文や
+プロジェクトの絶対パスを保存せず、比較用のSHA-256と相対パスだけを記録します。競合時は
+接続中のプロジェクトにある対象ファイルを読み、targetが存在すればtarget diffまたは
+artifact、targetで削除されていれば`artifacts/base`の対応ファイルと比較します。
 
 Applyの整合性検査は、Planの操作内容、artifact、現在のprojectが食い違う変更を検出します。
 生成時刻などApply判断に使わないmetadataの変更は対象外であり、Bundle全体を暗号学的に
@@ -216,6 +218,7 @@ irm https://raw.githubusercontent.com/rukaruka966/ibuki-bootstrapper/main/update
 pwsh ./update.ps1 `
   -Mode Apply `
   -PlanPath <Update Bundleのplan.json> `
+  -ProjectRoot . `
   -Yes
 ```
 
@@ -224,6 +227,8 @@ Plan作成後に対象ファイルまたはartifactが変化していないこ�
 `conflict`または`delete-candidate`が1件でもあれば、全Applyを停止します。
 プロジェクトのinstall、lint、test、build、起動、Commit、push、Pull Request作成は
 自動実行しません。
+Update Planはschema 2を使用し、Apply対象のルートを保存しません。旧schemaのPlanは
+Applyせず、現在のUpdaterでPlanから作り直してください。
 
 schema v1の`project.config.yaml`は利用できます。新規生成または更新後はschema v2になり、
 生成元Repository、Blueprint ID、Release version、不変Commitを記録します。
@@ -244,7 +249,10 @@ npm packageの公開やRelease用のソースCommitは行いません。
 
 Bootstrapperの開始時には、実行しているCommitとGitHub Releaseの対応を表示します。
 `main`が最新Releaseより先に進んでいる場合は`Unreleased`と表示します。Release情報
-だけを取得できない場合は`unavailable`と表示して生成を継続します。
+だけを取得できない場合も`unavailable`と表示し、構成選択やキャンセルはできます。ただし、
+生成される`project.config.yaml`へ数値SemVerを記録できないため、実際のファイル生成は
+Destinationへの書込み前に停止します。`Unreleased (latest: vX.Y.Z)`は`X.Y.Z`を記録して
+生成できます。
 
 未認証GitHub APIがrate limitまたは通信エラーになった場合は、GitHub CLIが利用可能
 かつ認証済みなら`gh api`へ自動的にフォールバックします。token自体は取得・表示せず、

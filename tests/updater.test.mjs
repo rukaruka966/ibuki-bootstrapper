@@ -17,6 +17,7 @@ const repositoryRoot = path.resolve(
 const updaterPath = path.join(repositoryRoot, "update.ps1");
 const baseCommit = "1".repeat(40);
 const targetCommit = "2".repeat(40);
+const localSecretSentinel = "IBUKI_LOCAL_SECRET_DO_NOT_PERSIST_7c1e9f";
 const temporaryDirectories = new Set();
 
 async function makeTemporaryDirectory(prefix) {
@@ -45,6 +46,18 @@ async function runUpdater(args, options = {}) {
       maxBuffer: 10 * 1024 * 1024,
     },
   );
+}
+
+function applyArguments(fixture, planPath, extras = ["-NonInteractive", "-Yes"]) {
+  return [
+    "-Mode",
+    "Apply",
+    "-PlanPath",
+    planPath,
+    "-ProjectRoot",
+    fixture.projectRoot,
+    ...extras,
+  ];
 }
 
 function runInteractiveUpdaterAtConfirmation(
@@ -287,6 +300,7 @@ async function makeComprehensiveFixture() {
     { target: "keep.txt", content: "shared-keep\n" },
     { target: "current.txt", content: "base-current\n" },
     { target: "conflict.txt", content: "base-conflict\n" },
+    { target: "removed-conflict.txt", content: "base-removed\n" },
     { target: "delete.txt", content: "base-delete\n" },
     { target: "binary.bin", content: Buffer.from([0, 1, 2]), kind: "binary" },
   ];
@@ -314,8 +328,15 @@ async function makeComprehensiveFixture() {
 
   await writeFile(path.join(projectRoot, "keep.txt"), "project-keep\n");
   await writeFile(path.join(projectRoot, "current.txt"), "target-current\n");
-  await writeFile(path.join(projectRoot, "conflict.txt"), "project-conflict\n");
+  await writeFile(
+    path.join(projectRoot, "conflict.txt"),
+    `project-conflict\n${localSecretSentinel}\n`,
+  );
   await writeFile(path.join(projectRoot, "binary.bin"), Buffer.from([9, 9, 9]));
+  await writeFile(
+    path.join(projectRoot, "removed-conflict.txt"),
+    "project-owned removal conflict\n",
+  );
 
   return { root, baseRoot, targetRoot, projectRoot };
 }
@@ -348,6 +369,24 @@ async function readPlan(bundleRoot) {
   return JSON.parse(await readFile(path.join(bundleRoot, "plan.json"), "utf8"));
 }
 
+async function readBundleFiles(root, relativeRoot = "") {
+  const files = [];
+
+  for (const entry of await readdir(path.join(root, relativeRoot), {
+    withFileTypes: true,
+  })) {
+    const relativePath = path.join(relativeRoot, entry.name);
+
+    if (entry.isDirectory()) {
+      files.push(...await readBundleFiles(root, relativePath));
+    } else {
+      files.push({ relativePath, bytes: await readFile(path.join(root, relativePath)) });
+    }
+  }
+
+  return files;
+}
+
 function stablePlan(plan) {
   return {
     source: plan.source,
@@ -366,26 +405,90 @@ test("Plan classifies every three-way state without changing the project", async
   );
   await runUpdater(sourceArguments(fixture, bundleRoot));
   const plan = await readPlan(bundleRoot);
+  const prompt = await readFile(path.join(bundleRoot, "prompt.md"), "utf8");
 
+  assert.equal(plan.schemaVersion, 2);
+  assert.equal(plan.project.root, undefined);
   assert.deepEqual(plan.counts, {
     add: 1,
     "safe-update": 2,
     "keep-local": 1,
     "already-current": 1,
-    conflict: 2,
+    conflict: 3,
     "delete-candidate": 1,
   });
   assert.equal(
     await readFile(path.join(fixture.projectRoot, "project.config.yaml"), "utf8"),
     before,
   );
-  assert.match(await readFile(path.join(bundleRoot, "prompt.md"), "utf8"), /untrusted project data/);
+  assert.match(prompt, /untrusted project data/);
+  assert.doesNotMatch(prompt, /local diffs/);
+  assert.doesNotMatch(prompt, new RegExp(fixture.projectRoot.replaceAll("\\", "\\\\")));
   assert.match(await readFile(path.join(bundleRoot, "summary.md"), "utf8"), /No project files were changed/);
+  const conflictOperation = plan.operations.find(
+    ({ path: file }) => file === "conflict.txt",
+  );
+  assert.equal(
+    conflictOperation.localHash,
+    sha256(Buffer.from(`project-conflict\n${localSecretSentinel}\n`)),
+  );
+  assert.equal(conflictOperation.diffs.project, undefined);
+  assert.match(conflictOperation.diffs.target, /\.target\.patch$/);
+  const removedConflict = plan.operations.find(
+    ({ path: file }) => file === "removed-conflict.txt",
+  );
+  assert.equal(removedConflict.status, "conflict");
+  assert.equal(removedConflict.targetHash, null);
+  assert.equal(removedConflict.targetArtifact, null);
+  assert.equal(removedConflict.diffs.target, undefined);
+  assert.equal(
+    await readFile(
+      path.join(bundleRoot, "artifacts", "base", "removed-conflict.txt"),
+      "utf8",
+    ),
+    "base-removed\n",
+  );
+  assert.match(prompt, /artifacts\/base\/<operation\.path>/);
   assert.equal(
     plan.operations.find(({ path: file }) => file === "binary.bin").diffs
       .project,
     undefined,
   );
+  const safeDiff = await readFile(
+    path.join(bundleRoot, "diffs", "safe-update", "safe.txt.patch"),
+    "utf8",
+  );
+  assert.match(safeDiff, /^--- a\/base\/safe\.txt$/m);
+  assert.doesNotMatch(safeDiff, /local/);
+  const bundleFiles = await readBundleFiles(bundleRoot);
+  assert.equal(
+    bundleFiles.some(({ relativePath }) => relativePath.endsWith(".project.patch")),
+    false,
+  );
+  const persistedText = Buffer.concat(bundleFiles.map(({ bytes }) => bytes))
+    .toString("utf8")
+    .replaceAll("\\\\", "\\");
+  assert.doesNotMatch(persistedText, new RegExp(localSecretSentinel));
+  assert.doesNotMatch(
+    persistedText,
+    new RegExp(fixture.projectRoot.replaceAll("\\", "\\\\")),
+  );
+  assert.doesNotMatch(
+    persistedText,
+    new RegExp(bundleRoot.replaceAll("\\", "\\\\")),
+  );
+  const normalizedPersistedText = persistedText
+    .replaceAll("\\", "/")
+    .toLowerCase();
+  assert.equal(
+    normalizedPersistedText.includes(fixture.projectRoot.replaceAll("\\", "/").toLowerCase()),
+    false,
+  );
+  assert.equal(
+    normalizedPersistedText.includes(bundleRoot.replaceAll("\\", "/").toLowerCase()),
+    false,
+  );
+  await assert.rejects(stat(path.join(bundleRoot, ".diff-work")), { code: "ENOENT" });
 });
 
 test("Plan rejects an oversized ordinary managed file before reading it", async () => {
@@ -542,6 +645,7 @@ async function makeApplyFixture(branch = "feat/updater-test", conflictFree = tru
     await writeFile(path.join(fixture.projectRoot, "conflict.txt"), "base-conflict\n");
     await writeFile(path.join(fixture.projectRoot, "binary.bin"), Buffer.from([0, 1, 2]));
     await rm(path.join(fixture.projectRoot, "delete.txt"));
+    await rm(path.join(fixture.projectRoot, "removed-conflict.txt"));
   }
   await runGit(fixture.projectRoot, ["init", "-b", "develop"]);
   await runGit(fixture.projectRoot, ["config", "user.email", "ibuki@example.invalid"]);
@@ -560,7 +664,7 @@ test("Apply writes only a conflict-free, unchanged Plan on a feature branch", as
   await runUpdater(sourceArguments(fixture, bundleRoot));
   const planPath = path.join(bundleRoot, "plan.json");
 
-  await runUpdater(["-Mode", "Apply", "-PlanPath", planPath, "-NonInteractive", "-Yes"]);
+  await runUpdater(applyArguments(fixture, planPath));
   assert.equal(await readFile(path.join(fixture.projectRoot, "safe.txt"), "utf8"), "target-safe\n");
   assert.equal(await readFile(path.join(fixture.projectRoot, "add.txt"), "utf8"), "target-add\n");
   const config = await readFile(path.join(fixture.projectRoot, "project.config.yaml"), "utf8");
@@ -571,6 +675,75 @@ test("Apply writes only a conflict-free, unchanged Plan on a feature branch", as
     (await readdir(bundleRoot)).some((entry) => entry.startsWith("rollback-")),
     false,
   );
+});
+
+test("Apply requires an explicit ProjectRoot and leaves the project unchanged", async () => {
+  const fixture = await makeApplyFixture();
+  const bundleRoot = path.join(fixture.root, "bundle-missing-project-root");
+  await runUpdater(sourceArguments(fixture, bundleRoot));
+  const planPath = path.join(bundleRoot, "plan.json");
+  const safePath = path.join(fixture.projectRoot, "safe.txt");
+  const before = await readFile(safePath);
+
+  await assert.rejects(
+    runUpdater(["-Mode", "Apply", "-PlanPath", planPath, "-NonInteractive", "-Yes"]),
+    /Apply Mode requires -ProjectRoot/,
+  );
+  assert.deepEqual(await readFile(safePath), before);
+});
+
+test("Apply rejects a different explicit project identity", async () => {
+  const fixture = await makeApplyFixture();
+  const bundleRoot = path.join(fixture.root, "bundle-wrong-project-root");
+  await runUpdater(sourceArguments(fixture, bundleRoot));
+  const planPath = path.join(bundleRoot, "plan.json");
+  const otherFixture = await makeApplyFixture();
+  const otherConfigPath = path.join(otherFixture.projectRoot, "project.config.yaml");
+  const otherConfig = await readFile(otherConfigPath, "utf8");
+  await writeFile(
+    otherConfigPath,
+    otherConfig.replace("  id: sample-app", "  id: other-app"),
+  );
+  await runGit(otherFixture.projectRoot, ["add", "project.config.yaml"]);
+  await runGit(otherFixture.projectRoot, ["commit", "-m", "test: change identity"]);
+
+  await assert.rejects(
+    runUpdater(applyArguments(otherFixture, planPath)),
+    /project identity or branch strategy/,
+  );
+});
+
+test("Apply rejects legacy schema 1 Plans and requires a new Plan", async () => {
+  const fixture = await makeApplyFixture();
+  const bundleRoot = path.join(fixture.root, "bundle-schema-1");
+  await runUpdater(sourceArguments(fixture, bundleRoot));
+  const planPath = path.join(bundleRoot, "plan.json");
+  const plan = await readPlan(bundleRoot);
+  plan.schemaVersion = 1;
+  await writeFile(planPath, `${JSON.stringify(plan, null, 2)}\n`);
+
+  await assert.rejects(
+    runUpdater(applyArguments(fixture, planPath)),
+    /schemaVersion 2 is required.*Regenerate the Plan/,
+  );
+});
+
+test("Apply rejects a persisted project root property", async () => {
+  const fixture = await makeApplyFixture();
+  const bundleRoot = path.join(fixture.root, "bundle-injected-root");
+  await runUpdater(sourceArguments(fixture, bundleRoot));
+  const planPath = path.join(bundleRoot, "plan.json");
+  const plan = await readPlan(bundleRoot);
+  const decoyRoot = path.join(fixture.root, "decoy");
+  await mkdir(decoyRoot, { recursive: true });
+  plan.project.root = decoyRoot;
+  await writeFile(planPath, `${JSON.stringify(plan, null, 2)}\n`);
+
+  await assert.rejects(
+    runUpdater(applyArguments(fixture, planPath)),
+    /Plan file has an invalid contract/,
+  );
+  assert.deepEqual(await readdir(decoyRoot), []);
 });
 
 test("Apply rejects an oversized Plan before reading it", async () => {
@@ -584,7 +757,7 @@ test("Apply rejects an oversized Plan before reading it", async () => {
   );
 
   await assert.rejects(
-    runUpdater(["-Mode", "Apply", "-PlanPath", planPath, "-NonInteractive", "-Yes"]),
+    runUpdater(applyArguments(fixture, planPath)),
     /Plan file exceeds the size limit/,
   );
 });
@@ -600,7 +773,7 @@ test("Apply revalidates the branch after interactive confirmation before writing
   const configBefore = await readFile(configPath);
 
   const result = await runInteractiveUpdaterAtConfirmation(
-    ["-Mode", "Apply", "-PlanPath", planPath],
+    applyArguments(fixture, planPath, []),
     () => runGit(fixture.projectRoot, ["switch", "develop"]),
     {
       confirmationMarker: path.join(
@@ -638,7 +811,7 @@ test("Apply revalidates target artifacts after interactive confirmation before w
   const configBefore = await readFile(configPath);
 
   const result = await runInteractiveUpdaterAtConfirmation(
-    ["-Mode", "Apply", "-PlanPath", planPath],
+    applyArguments(fixture, planPath, []),
     () => writeFile(artifactPath, "tampered-after-confirmation\n", "utf8"),
     {
       confirmationMarker: path.join(
@@ -671,7 +844,7 @@ test("Apply rejects protected branches and post-Plan project changes", async () 
   const protectedPlanPath = path.join(protectedBundle, "plan.json");
   await runUpdater(sourceArguments(protectedFixture, protectedBundle));
   await assert.rejects(
-    runUpdater(["-Mode", "Apply", "-PlanPath", protectedPlanPath, "-NonInteractive", "-Yes"]),
+    runUpdater(applyArguments(protectedFixture, protectedPlanPath)),
     /branch other than 'develop'/,
   );
 
@@ -683,7 +856,7 @@ test("Apply rejects protected branches and post-Plan project changes", async () 
     `${JSON.stringify(tamperedBranchPlan, null, 2)}\n`,
   );
   await assert.rejects(
-    runUpdater(["-Mode", "Apply", "-PlanPath", protectedPlanPath, "-NonInteractive", "-Yes"]),
+    runUpdater(applyArguments(protectedFixture, protectedPlanPath)),
     /project identity or branch strategy/,
   );
 
@@ -695,7 +868,7 @@ test("Apply rejects protected branches and post-Plan project changes", async () 
   await runGit(changedFixture.projectRoot, ["add", "safe.txt"]);
   await runGit(changedFixture.projectRoot, ["commit", "-m", "test: mutate after plan"]);
   await assert.rejects(
-    runUpdater(["-Mode", "Apply", "-PlanPath", changedPlanPath, "-NonInteractive", "-Yes"]),
+    runUpdater(applyArguments(changedFixture, changedPlanPath)),
     /Project changed after Plan creation/,
   );
 });
@@ -713,7 +886,7 @@ test("Apply rejects a removed operation whose generated count remains", async ()
   await writeFile(planPath, `${JSON.stringify(plan, null, 2)}\n`);
 
   await assert.rejects(
-    runUpdater(["-Mode", "Apply", "-PlanPath", planPath, "-NonInteractive", "-Yes"]),
+    runUpdater(applyArguments(fixture, planPath)),
     /Plan counts do not match its operations: conflict/,
   );
   assert.equal(await readFile(configPath, "utf8"), before);
@@ -735,7 +908,7 @@ test("Apply rejects removed blockers even when their counts are also edited", as
   await writeFile(planPath, `${JSON.stringify(plan, null, 2)}\n`);
 
   await assert.rejects(
-    runUpdater(["-Mode", "Apply", "-PlanPath", planPath, "-NonInteractive", "-Yes"]),
+    runUpdater(applyArguments(fixture, planPath)),
     /Plan operation set does not match its base and target artifacts/,
   );
   assert.equal(await readFile(configPath, "utf8"), before);
@@ -757,7 +930,7 @@ test("Apply rejects a valid-looking status and count reclassification", async ()
   await writeFile(planPath, `${JSON.stringify(plan, null, 2)}\n`);
 
   await assert.rejects(
-    runUpdater(["-Mode", "Apply", "-PlanPath", planPath, "-NonInteractive", "-Yes"]),
+    runUpdater(applyArguments(fixture, planPath)),
     /Plan operation classification does not match current evidence/,
   );
   assert.equal(await readFile(configPath, "utf8"), before);
@@ -794,7 +967,7 @@ test("Apply rejects a tampered operation contract", async () => {
   await writeFile(planPath, `${JSON.stringify(plan, null, 2)}\n`);
 
   await assert.rejects(
-    runUpdater(["-Mode", "Apply", "-PlanPath", planPath, "-NonInteractive", "-Yes"]),
+    runUpdater(applyArguments(fixture, planPath)),
     /invalid status/,
   );
 });

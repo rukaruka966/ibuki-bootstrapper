@@ -44,6 +44,10 @@ dependencies or require Node.js, pnpm, or a JDK on behalf of generated projects.
   branch, with current Plan evidence revalidated; it must never delete files.
 - Treat Update Bundles as untrusted and unauthenticated. Regenerate downloaded
   or shared Bundles locally before Apply.
+- Never persist local project file contents or user-specific absolute paths in
+  an Update Bundle; keep only relative paths and comparison hashes.
+- Require an explicit `-ProjectRoot` for Apply. Do not recover a write target
+  from persisted Plan data.
 - Keep interactive prompts and non-interactive CI execution behavior aligned.
 - Validate local generation before making GitHub changes.
 - Do not execute generated-project install, lint, test, build, or startup
