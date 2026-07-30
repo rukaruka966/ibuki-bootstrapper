@@ -179,9 +179,10 @@ Requestを常に最新の`develop`を基準として検証します。
 
 ## 生成済みプロジェクトの更新
 
-過去のIbuki Releaseで生成したプロジェクトでは、プロジェクトルートからUpdaterを
-実行できます。標準のPlan Modeはファイルを変更せず、現在のプロジェクト、生成時の
-Blueprint、更新先Releaseを3-way比較します。
+Ibuki v0.8.0以降のReleaseで生成したプロジェクトでは、プロジェクトルートから
+Updaterを実行できます。標準のPlan Modeはファイルを変更せず、現在のプロジェクト、
+生成時のBlueprint、更新先Releaseを3-way比較します。v0.7.1以前のプロジェクトは
+Manifest契約が異なるため、GitHubからの取得やUpdate Bundle作成前に停止します。
 
 ```powershell
 irm https://raw.githubusercontent.com/rukaruka966/ibuki-bootstrapper/main/update.ps1 | iex
@@ -230,8 +231,9 @@ Plan作成後に対象ファイルまたはartifactが変化していないこ�
 Update Planはschema 2を使用し、Apply対象のルートを保存しません。旧schemaのPlanは
 Applyせず、現在のUpdaterでPlanから作り直してください。
 
-schema v1の`project.config.yaml`は利用できます。新規生成または更新後はschema v2になり、
-生成元Repository、Blueprint ID、Release version、不変Commitを記録します。
+Ibuki v0.8.0以降で生成されたschema v1の`project.config.yaml`は利用できます。
+新規生成または更新後はschema v2になり、生成元Repository、Blueprint ID、
+Release version、不変Commitを記録します。
 
 ## 生成後の不具合報告
 
