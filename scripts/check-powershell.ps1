@@ -5,6 +5,7 @@ $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path $PSScriptRoot -Parent
 $scripts = @(
     (Join-Path $repositoryRoot "bootstrap.ps1")
+    (Join-Path $repositoryRoot "update.ps1")
     Get-ChildItem -LiteralPath $PSScriptRoot -Filter "*.ps1" -File
     Get-ChildItem `
         -LiteralPath (Join-Path $repositoryRoot "blueprints") `

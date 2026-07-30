@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 2
 project:
   id: __PROJECT_ID__
   displayName: "__PROJECT_DISPLAY_NAME_YAML__"
@@ -13,4 +13,7 @@ systems:
     type: hono
     port: 3000
 bootstrapper:
+  source: rukaruka966/ibuki-bootstrapper
+  blueprint: web-hono
   version: __BOOTSTRAPPER_VERSION__
+  commit: __BOOTSTRAPPER_COMMIT__
